@@ -1,4 +1,4 @@
-pub const SCHEMA_VERSION: i32 = 3;
+pub const SCHEMA_VERSION: i32 = 4;
 
 pub const SCHEMA_SQL: &str = "
 -- Memory records: the source of truth
@@ -108,6 +108,43 @@ CREATE TABLE IF NOT EXISTS conflicts (
     origin_actor TEXT NOT NULL
 );
 
+-- Persisted triggers with lifecycle tracking
+CREATE TABLE IF NOT EXISTS trigger_log (
+    trigger_id TEXT PRIMARY KEY,
+    trigger_type TEXT NOT NULL,
+    urgency REAL NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    reason TEXT NOT NULL,
+    suggested_action TEXT NOT NULL,
+    source_rids TEXT NOT NULL DEFAULT '[]',
+    context TEXT NOT NULL DEFAULT '{}',
+    created_at REAL NOT NULL,
+    delivered_at REAL,
+    acknowledged_at REAL,
+    acted_at REAL,
+    expires_at REAL,
+    cooldown_key TEXT,
+    hlc BLOB NOT NULL,
+    origin_actor TEXT NOT NULL
+);
+
+-- Detected patterns across memories
+CREATE TABLE IF NOT EXISTS patterns (
+    pattern_id TEXT PRIMARY KEY,
+    pattern_type TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    confidence REAL NOT NULL,
+    description TEXT NOT NULL,
+    evidence_rids TEXT NOT NULL DEFAULT '[]',
+    entity_names TEXT NOT NULL DEFAULT '[]',
+    context TEXT NOT NULL DEFAULT '{}',
+    first_seen REAL NOT NULL,
+    last_confirmed REAL NOT NULL,
+    occurrence_count INTEGER NOT NULL DEFAULT 1,
+    hlc BLOB NOT NULL,
+    origin_actor TEXT NOT NULL
+);
+
 -- Indexes for common query patterns
 CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(type);
 CREATE INDEX IF NOT EXISTS idx_memories_created ON memories(created_at);
@@ -128,6 +165,14 @@ CREATE INDEX IF NOT EXISTS idx_conflicts_priority ON conflicts(priority);
 CREATE INDEX IF NOT EXISTS idx_conflicts_entity ON conflicts(entity);
 CREATE INDEX IF NOT EXISTS idx_conflicts_memory_a ON conflicts(memory_a);
 CREATE INDEX IF NOT EXISTS idx_conflicts_memory_b ON conflicts(memory_b);
+CREATE INDEX IF NOT EXISTS idx_trigger_log_status ON trigger_log(status);
+CREATE INDEX IF NOT EXISTS idx_trigger_log_type ON trigger_log(trigger_type);
+CREATE INDEX IF NOT EXISTS idx_trigger_log_created ON trigger_log(created_at);
+CREATE INDEX IF NOT EXISTS idx_trigger_log_cooldown ON trigger_log(cooldown_key);
+CREATE INDEX IF NOT EXISTS idx_trigger_log_urgency ON trigger_log(urgency DESC);
+CREATE INDEX IF NOT EXISTS idx_patterns_type ON patterns(pattern_type);
+CREATE INDEX IF NOT EXISTS idx_patterns_status ON patterns(status);
+CREATE INDEX IF NOT EXISTS idx_patterns_confidence ON patterns(confidence DESC);
 ";
 
 /// SQL to migrate from schema V1 to V2.
@@ -186,4 +231,51 @@ CREATE INDEX IF NOT EXISTS idx_conflicts_priority ON conflicts(priority);
 CREATE INDEX IF NOT EXISTS idx_conflicts_entity ON conflicts(entity);
 CREATE INDEX IF NOT EXISTS idx_conflicts_memory_a ON conflicts(memory_a);
 CREATE INDEX IF NOT EXISTS idx_conflicts_memory_b ON conflicts(memory_b);
+";
+
+/// SQL to migrate from schema V3 to V4.
+pub const MIGRATE_V3_TO_V4: &str = "
+CREATE TABLE IF NOT EXISTS trigger_log (
+    trigger_id TEXT PRIMARY KEY,
+    trigger_type TEXT NOT NULL,
+    urgency REAL NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    reason TEXT NOT NULL,
+    suggested_action TEXT NOT NULL,
+    source_rids TEXT NOT NULL DEFAULT '[]',
+    context TEXT NOT NULL DEFAULT '{}',
+    created_at REAL NOT NULL,
+    delivered_at REAL,
+    acknowledged_at REAL,
+    acted_at REAL,
+    expires_at REAL,
+    cooldown_key TEXT,
+    hlc BLOB NOT NULL,
+    origin_actor TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS patterns (
+    pattern_id TEXT PRIMARY KEY,
+    pattern_type TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    confidence REAL NOT NULL,
+    description TEXT NOT NULL,
+    evidence_rids TEXT NOT NULL DEFAULT '[]',
+    entity_names TEXT NOT NULL DEFAULT '[]',
+    context TEXT NOT NULL DEFAULT '{}',
+    first_seen REAL NOT NULL,
+    last_confirmed REAL NOT NULL,
+    occurrence_count INTEGER NOT NULL DEFAULT 1,
+    hlc BLOB NOT NULL,
+    origin_actor TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_trigger_log_status ON trigger_log(status);
+CREATE INDEX IF NOT EXISTS idx_trigger_log_type ON trigger_log(trigger_type);
+CREATE INDEX IF NOT EXISTS idx_trigger_log_created ON trigger_log(created_at);
+CREATE INDEX IF NOT EXISTS idx_trigger_log_cooldown ON trigger_log(cooldown_key);
+CREATE INDEX IF NOT EXISTS idx_trigger_log_urgency ON trigger_log(urgency DESC);
+CREATE INDEX IF NOT EXISTS idx_patterns_type ON patterns(pattern_type);
+CREATE INDEX IF NOT EXISTS idx_patterns_status ON patterns(status);
+CREATE INDEX IF NOT EXISTS idx_patterns_confidence ON patterns(confidence DESC);
 ";

@@ -10,6 +10,7 @@ pub mod triggers;
 pub mod replication;
 pub mod sync;
 pub mod conflict;
+pub mod patterns;
 
 pub use engine::AIDB;
 pub use error::AidbError;
@@ -17,3 +18,4 @@ pub use types::*;
 pub use consolidate::{consolidate, find_consolidation_candidates};
 pub use triggers::{check_decay_triggers, check_consolidation_triggers, check_all_triggers};
 pub use conflict::{scan_conflicts, detect_edge_conflicts, create_conflict};
+pub use patterns::mine_patterns;

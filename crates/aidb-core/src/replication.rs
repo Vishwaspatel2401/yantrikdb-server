@@ -195,8 +195,13 @@ fn materialize_op(db: &AIDB, op: &OplogEntry) -> Result<()> {
         "conflict_detect" => materialize_conflict_detect(conn, &op.payload, &op.hlc, &op.origin_actor)?,
         "conflict_resolve" => materialize_conflict_resolve(conn, &op.payload)?,
         "correct" => materialize_correct(conn, &op.payload)?,
-        "reinforce" => {
-            // Reinforce is local-only; skip during replication
+        "trigger_fire" => materialize_trigger_fire(conn, &op.payload, &op.hlc, &op.origin_actor)?,
+        "trigger_deliver" | "trigger_ack" | "trigger_act" | "trigger_dismiss" => {
+            materialize_trigger_lifecycle(conn, &op.payload)?;
+        }
+        "pattern_upsert" => materialize_pattern(conn, &op.payload, &op.hlc, &op.origin_actor)?,
+        "reinforce" | "think" => {
+            // Local-only ops; skip during replication
         }
         _ => {
             // Unknown op types are silently skipped (forward compatibility)
@@ -589,6 +594,126 @@ pub fn rebuild_vec_index(db: &AIDB) -> Result<usize> {
     }
 
     Ok(count)
+}
+
+// ── V3 materializers: triggers and patterns ──
+
+/// Materialize a "trigger_fire" op: INSERT OR IGNORE into trigger_log.
+fn materialize_trigger_fire(
+    conn: &Connection,
+    payload: &serde_json::Value,
+    hlc: &[u8],
+    origin_actor: &str,
+) -> Result<()> {
+    let trigger_id = payload["trigger_id"].as_str().unwrap_or_default();
+    if trigger_id.is_empty() {
+        return Ok(());
+    }
+
+    conn.execute(
+        "INSERT OR IGNORE INTO trigger_log \
+         (trigger_id, trigger_type, urgency, status, reason, suggested_action, \
+          source_rids, context, created_at, expires_at, cooldown_key, hlc, origin_actor) \
+         VALUES (?1, ?2, ?3, 'pending', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        params![
+            trigger_id,
+            payload["trigger_type"].as_str().unwrap_or(""),
+            payload["urgency"].as_f64().unwrap_or(0.0),
+            payload["reason"].as_str().unwrap_or(""),
+            payload["suggested_action"].as_str().unwrap_or(""),
+            payload.get("source_rids").map(|v| v.to_string()).unwrap_or("[]".to_string()),
+            payload.get("context").map(|v| v.to_string()).unwrap_or("{}".to_string()),
+            payload["created_at"].as_f64().unwrap_or(0.0),
+            payload["expires_at"].as_f64(),
+            payload["cooldown_key"].as_str().unwrap_or(""),
+            hlc,
+            origin_actor,
+        ],
+    )?;
+    Ok(())
+}
+
+/// Materialize a trigger lifecycle transition (deliver/ack/act/dismiss).
+fn materialize_trigger_lifecycle(
+    conn: &Connection,
+    payload: &serde_json::Value,
+) -> Result<()> {
+    let trigger_id = payload["trigger_id"].as_str().unwrap_or_default();
+    if trigger_id.is_empty() {
+        return Ok(());
+    }
+
+    // Determine which status to set based on the payload keys
+    if let Some(ts) = payload["dismissed_at"].as_f64() {
+        conn.execute(
+            "UPDATE trigger_log SET status = 'dismissed', acted_at = ?1 \
+             WHERE trigger_id = ?2 AND status IN ('pending', 'delivered', 'acknowledged')",
+            params![ts, trigger_id],
+        )?;
+    } else if let Some(ts) = payload["acted_at"].as_f64() {
+        conn.execute(
+            "UPDATE trigger_log SET status = 'acted', acted_at = ?1 \
+             WHERE trigger_id = ?2 AND status IN ('delivered', 'acknowledged')",
+            params![ts, trigger_id],
+        )?;
+    } else if let Some(ts) = payload["acknowledged_at"].as_f64() {
+        conn.execute(
+            "UPDATE trigger_log SET status = 'acknowledged', acknowledged_at = ?1 \
+             WHERE trigger_id = ?2 AND status = 'delivered'",
+            params![ts, trigger_id],
+        )?;
+    } else if let Some(ts) = payload["delivered_at"].as_f64() {
+        conn.execute(
+            "UPDATE trigger_log SET status = 'delivered', delivered_at = ?1 \
+             WHERE trigger_id = ?2 AND status = 'pending'",
+            params![ts, trigger_id],
+        )?;
+    }
+
+    Ok(())
+}
+
+/// Materialize a "pattern_upsert" op: convergent merge into patterns table.
+fn materialize_pattern(
+    conn: &Connection,
+    payload: &serde_json::Value,
+    hlc: &[u8],
+    origin_actor: &str,
+) -> Result<()> {
+    let pattern_id = payload["pattern_id"].as_str().unwrap_or_default();
+    if pattern_id.is_empty() {
+        return Ok(());
+    }
+
+    conn.execute(
+        "INSERT INTO patterns \
+         (pattern_id, pattern_type, status, confidence, description, \
+          evidence_rids, entity_names, context, first_seen, last_confirmed, \
+          occurrence_count, hlc, origin_actor) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13) \
+         ON CONFLICT(pattern_id) DO UPDATE SET \
+         confidence = MAX(confidence, excluded.confidence), \
+         last_confirmed = MAX(last_confirmed, excluded.last_confirmed), \
+         occurrence_count = MAX(occurrence_count, excluded.occurrence_count), \
+         status = CASE WHEN excluded.last_confirmed > last_confirmed \
+                  THEN excluded.status ELSE status END",
+        params![
+            pattern_id,
+            payload["pattern_type"].as_str().unwrap_or(""),
+            payload["status"].as_str().unwrap_or("active"),
+            payload["confidence"].as_f64().unwrap_or(0.0),
+            payload["description"].as_str().unwrap_or(""),
+            payload.get("evidence_rids").map(|v| v.to_string()).unwrap_or("[]".to_string()),
+            payload.get("entity_names").map(|v| v.to_string()).unwrap_or("[]".to_string()),
+            payload.get("context").map(|v| v.to_string()).unwrap_or("{}".to_string()),
+            payload["first_seen"].as_f64().unwrap_or(0.0),
+            payload["last_confirmed"].as_f64().unwrap_or(0.0),
+            payload["occurrence_count"].as_i64().unwrap_or(1),
+            hlc,
+            origin_actor,
+        ],
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]

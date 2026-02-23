@@ -446,6 +446,80 @@ impl PyAIDB {
         Ok(dict.into())
     }
 
+    // ── Cognition loop (V3) ──
+
+    #[pyo3(signature = (config=None))]
+    fn think(&self, py: Python<'_>, config: Option<&Bound<'_, PyDict>>) -> PyResult<PyObject> {
+        let db = self.get_inner()?;
+        let cfg = if let Some(d) = config {
+            let mut c = aidb_core::ThinkConfig::default();
+            if let Ok(Some(v)) = d.get_item("importance_threshold") { c.importance_threshold = v.extract()?; }
+            if let Ok(Some(v)) = d.get_item("decay_threshold") { c.decay_threshold = v.extract()?; }
+            if let Ok(Some(v)) = d.get_item("max_triggers") { c.max_triggers = v.extract()?; }
+            if let Ok(Some(v)) = d.get_item("run_consolidation") { c.run_consolidation = v.extract()?; }
+            if let Ok(Some(v)) = d.get_item("run_conflict_scan") { c.run_conflict_scan = v.extract()?; }
+            if let Ok(Some(v)) = d.get_item("run_pattern_mining") { c.run_pattern_mining = v.extract()?; }
+            if let Ok(Some(v)) = d.get_item("min_active_memories") { c.min_active_memories = v.extract()?; }
+            c
+        } else {
+            aidb_core::ThinkConfig::default()
+        };
+        let result = db.think(&cfg).map_err(map_err)?;
+        think_result_to_dict(py, &result)
+    }
+
+    fn deliver_trigger(&self, trigger_id: &str) -> PyResult<bool> {
+        let db = self.get_inner()?;
+        db.deliver_trigger(trigger_id).map_err(map_err)
+    }
+
+    fn acknowledge_trigger(&self, trigger_id: &str) -> PyResult<bool> {
+        let db = self.get_inner()?;
+        db.acknowledge_trigger(trigger_id).map_err(map_err)
+    }
+
+    fn act_on_trigger(&self, trigger_id: &str) -> PyResult<bool> {
+        let db = self.get_inner()?;
+        db.act_on_trigger(trigger_id).map_err(map_err)
+    }
+
+    fn dismiss_trigger(&self, trigger_id: &str) -> PyResult<bool> {
+        let db = self.get_inner()?;
+        db.dismiss_trigger(trigger_id).map_err(map_err)
+    }
+
+    #[pyo3(signature = (limit=10))]
+    fn get_pending_triggers(&self, py: Python<'_>, limit: usize) -> PyResult<Vec<PyObject>> {
+        let db = self.get_inner()?;
+        let triggers = db.get_pending_triggers(limit).map_err(map_err)?;
+        triggers.iter().map(|t| persisted_trigger_to_dict(py, t)).collect()
+    }
+
+    #[pyo3(signature = (trigger_type=None, limit=50))]
+    fn get_trigger_history(
+        &self,
+        py: Python<'_>,
+        trigger_type: Option<&str>,
+        limit: usize,
+    ) -> PyResult<Vec<PyObject>> {
+        let db = self.get_inner()?;
+        let triggers = db.get_trigger_history(trigger_type, limit).map_err(map_err)?;
+        triggers.iter().map(|t| persisted_trigger_to_dict(py, t)).collect()
+    }
+
+    #[pyo3(signature = (pattern_type=None, status=None, limit=50))]
+    fn get_patterns(
+        &self,
+        py: Python<'_>,
+        pattern_type: Option<&str>,
+        status: Option<&str>,
+        limit: usize,
+    ) -> PyResult<Vec<PyObject>> {
+        let db = self.get_inner()?;
+        let patterns = db.get_patterns(pattern_type, status, limit).map_err(map_err)?;
+        patterns.iter().map(|p| pattern_to_dict(py, p)).collect()
+    }
+
     fn close(&mut self) -> PyResult<()> {
         if let Some(db) = self.inner.take() {
             db.close().map_err(map_err)?;

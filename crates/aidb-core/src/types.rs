@@ -62,6 +62,8 @@ pub struct Stats {
     pub operations: i64,
     pub open_conflicts: i64,
     pub resolved_conflicts: i64,
+    pub pending_triggers: i64,
+    pub active_patterns: i64,
 }
 
 /// A proactive trigger.
@@ -202,4 +204,186 @@ pub struct CorrectionResult {
     pub original_rid: String,
     pub corrected_rid: String,
     pub original_tombstoned: bool,
+}
+
+// ── Cognition types (V3) ──
+
+/// Trigger type classification.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TriggerType {
+    DecayReview,
+    ConsolidationReady,
+    ConflictEscalation,
+    TemporalDrift,
+    Redundancy,
+    RelationshipInsight,
+    ValenceTrend,
+    EntityAnomaly,
+    PatternDiscovered,
+}
+
+impl TriggerType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TriggerType::DecayReview => "decay_review",
+            TriggerType::ConsolidationReady => "consolidation_ready",
+            TriggerType::ConflictEscalation => "conflict_escalation",
+            TriggerType::TemporalDrift => "temporal_drift",
+            TriggerType::Redundancy => "redundancy",
+            TriggerType::RelationshipInsight => "relationship_insight",
+            TriggerType::ValenceTrend => "valence_trend",
+            TriggerType::EntityAnomaly => "entity_anomaly",
+            TriggerType::PatternDiscovered => "pattern_discovered",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "decay_review" => TriggerType::DecayReview,
+            "consolidation_ready" => TriggerType::ConsolidationReady,
+            "conflict_escalation" => TriggerType::ConflictEscalation,
+            "temporal_drift" => TriggerType::TemporalDrift,
+            "redundancy" => TriggerType::Redundancy,
+            "relationship_insight" => TriggerType::RelationshipInsight,
+            "valence_trend" => TriggerType::ValenceTrend,
+            "entity_anomaly" => TriggerType::EntityAnomaly,
+            "pattern_discovered" => TriggerType::PatternDiscovered,
+            _ => TriggerType::DecayReview,
+        }
+    }
+
+    pub fn default_cooldown_secs(&self) -> f64 {
+        match self {
+            TriggerType::DecayReview => 86400.0 * 3.0,
+            TriggerType::ConsolidationReady => 86400.0,
+            TriggerType::ConflictEscalation => 86400.0 * 2.0,
+            TriggerType::TemporalDrift => 86400.0 * 14.0,
+            TriggerType::Redundancy => 86400.0,
+            TriggerType::RelationshipInsight => 86400.0 * 7.0,
+            TriggerType::ValenceTrend => 86400.0 * 7.0,
+            TriggerType::EntityAnomaly => 86400.0 * 7.0,
+            TriggerType::PatternDiscovered => 86400.0 * 7.0,
+        }
+    }
+
+    pub fn default_expiry_secs(&self) -> f64 {
+        match self {
+            TriggerType::DecayReview => 86400.0 * 7.0,
+            TriggerType::ConsolidationReady => 86400.0 * 3.0,
+            TriggerType::ConflictEscalation => 86400.0 * 14.0,
+            _ => 86400.0 * 7.0,
+        }
+    }
+}
+
+/// Configuration for the think() cognition loop.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThinkConfig {
+    pub importance_threshold: f64,
+    pub decay_threshold: f64,
+    pub max_triggers: usize,
+    pub run_consolidation: bool,
+    pub run_conflict_scan: bool,
+    pub run_pattern_mining: bool,
+    pub consolidation_sim_threshold: f64,
+    pub consolidation_time_window_days: f64,
+    pub consolidation_min_cluster: usize,
+    pub min_active_memories: i64,
+}
+
+impl Default for ThinkConfig {
+    fn default() -> Self {
+        Self {
+            importance_threshold: 0.5,
+            decay_threshold: 0.1,
+            max_triggers: 10,
+            run_consolidation: true,
+            run_conflict_scan: true,
+            run_pattern_mining: true,
+            consolidation_sim_threshold: 0.6,
+            consolidation_time_window_days: 7.0,
+            consolidation_min_cluster: 2,
+            min_active_memories: 10,
+        }
+    }
+}
+
+/// Result of a think() pass.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThinkResult {
+    pub triggers: Vec<Trigger>,
+    pub consolidation_count: usize,
+    pub conflicts_found: usize,
+    pub patterns_new: usize,
+    pub patterns_updated: usize,
+    pub expired_triggers: usize,
+    pub duration_ms: u64,
+}
+
+/// A persisted trigger with lifecycle state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PersistedTrigger {
+    pub trigger_id: String,
+    pub trigger_type: String,
+    pub urgency: f64,
+    pub status: String,
+    pub reason: String,
+    pub suggested_action: String,
+    pub source_rids: Vec<String>,
+    pub context: serde_json::Value,
+    pub created_at: f64,
+    pub delivered_at: Option<f64>,
+    pub acknowledged_at: Option<f64>,
+    pub acted_at: Option<f64>,
+    pub expires_at: Option<f64>,
+}
+
+/// A detected pattern across memories.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Pattern {
+    pub pattern_id: String,
+    pub pattern_type: String,
+    pub status: String,
+    pub confidence: f64,
+    pub description: String,
+    pub evidence_rids: Vec<String>,
+    pub entity_names: Vec<String>,
+    pub context: serde_json::Value,
+    pub first_seen: f64,
+    pub last_confirmed: f64,
+    pub occurrence_count: i64,
+}
+
+/// Result of pattern mining.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PatternMiningResult {
+    pub new_patterns: usize,
+    pub updated_patterns: usize,
+    pub stale_patterns: usize,
+}
+
+/// Configuration for pattern mining.
+#[derive(Debug, Clone)]
+pub struct PatternConfig {
+    pub co_occurrence_min_count: usize,
+    pub temporal_cluster_min_events: usize,
+    pub valence_trend_delta_threshold: f64,
+    pub topic_cluster_sim_threshold: f64,
+    pub topic_cluster_time_window_days: f64,
+    pub entity_hub_min_degree: usize,
+    pub max_patterns: usize,
+}
+
+impl Default for PatternConfig {
+    fn default() -> Self {
+        Self {
+            co_occurrence_min_count: 3,
+            temporal_cluster_min_events: 3,
+            valence_trend_delta_threshold: 0.3,
+            topic_cluster_sim_threshold: 0.55,
+            topic_cluster_time_window_days: 30.0,
+            entity_hub_min_degree: 5,
+            max_patterns: 50,
+        }
+    }
 }

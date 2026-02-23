@@ -78,6 +78,8 @@ pub fn stats_to_dict(py: Python<'_>, s: &aidb_core::Stats) -> PyResult<PyObject>
     dict.set_item("operations", s.operations)?;
     dict.set_item("open_conflicts", s.open_conflicts)?;
     dict.set_item("resolved_conflicts", s.resolved_conflicts)?;
+    dict.set_item("pending_triggers", s.pending_triggers)?;
+    dict.set_item("active_patterns", s.active_patterns)?;
     Ok(dict.into())
 }
 
@@ -100,6 +102,73 @@ pub fn conflict_to_dict(py: Python<'_>, c: &aidb_core::Conflict) -> PyResult<PyO
     dict.set_item("strategy", &c.strategy)?;
     dict.set_item("winner_rid", &c.winner_rid)?;
     dict.set_item("resolution_note", &c.resolution_note)?;
+    Ok(dict.into())
+}
+
+/// Convert an aidb-core ThinkResult to a Python dict.
+pub fn think_result_to_dict(py: Python<'_>, r: &aidb_core::ThinkResult) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
+
+    let triggers_list = pyo3::types::PyList::empty(py);
+    for t in &r.triggers {
+        let td = PyDict::new(py);
+        td.set_item("trigger_type", &t.trigger_type)?;
+        td.set_item("reason", &t.reason)?;
+        td.set_item("urgency", t.urgency)?;
+        let rids: Vec<&str> = t.source_rids.iter().map(|s| s.as_str()).collect();
+        td.set_item("source_rids", rids)?;
+        td.set_item("suggested_action", &t.suggested_action)?;
+        let ctx = json_to_py(py, &serde_json::json!(t.context))?;
+        td.set_item("context", ctx)?;
+        triggers_list.append(td)?;
+    }
+    dict.set_item("triggers", triggers_list)?;
+
+    dict.set_item("consolidation_count", r.consolidation_count)?;
+    dict.set_item("conflicts_found", r.conflicts_found)?;
+    dict.set_item("patterns_new", r.patterns_new)?;
+    dict.set_item("patterns_updated", r.patterns_updated)?;
+    dict.set_item("expired_triggers", r.expired_triggers)?;
+    dict.set_item("duration_ms", r.duration_ms)?;
+    Ok(dict.into())
+}
+
+/// Convert an aidb-core PersistedTrigger to a Python dict.
+pub fn persisted_trigger_to_dict(py: Python<'_>, t: &aidb_core::PersistedTrigger) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
+    dict.set_item("trigger_id", &t.trigger_id)?;
+    dict.set_item("trigger_type", &t.trigger_type)?;
+    dict.set_item("urgency", t.urgency)?;
+    dict.set_item("status", &t.status)?;
+    dict.set_item("reason", &t.reason)?;
+    dict.set_item("suggested_action", &t.suggested_action)?;
+    let rids: Vec<&str> = t.source_rids.iter().map(|s| s.as_str()).collect();
+    dict.set_item("source_rids", rids)?;
+    dict.set_item("context", json_to_py(py, &t.context)?)?;
+    dict.set_item("created_at", t.created_at)?;
+    dict.set_item("delivered_at", t.delivered_at)?;
+    dict.set_item("acknowledged_at", t.acknowledged_at)?;
+    dict.set_item("acted_at", t.acted_at)?;
+    dict.set_item("expires_at", t.expires_at)?;
+    Ok(dict.into())
+}
+
+/// Convert an aidb-core Pattern to a Python dict.
+pub fn pattern_to_dict(py: Python<'_>, p: &aidb_core::Pattern) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
+    dict.set_item("pattern_id", &p.pattern_id)?;
+    dict.set_item("pattern_type", &p.pattern_type)?;
+    dict.set_item("status", &p.status)?;
+    dict.set_item("confidence", p.confidence)?;
+    dict.set_item("description", &p.description)?;
+    let evidence: Vec<&str> = p.evidence_rids.iter().map(|s| s.as_str()).collect();
+    dict.set_item("evidence_rids", evidence)?;
+    let entities: Vec<&str> = p.entity_names.iter().map(|s| s.as_str()).collect();
+    dict.set_item("entity_names", entities)?;
+    dict.set_item("context", json_to_py(py, &p.context)?)?;
+    dict.set_item("first_seen", p.first_seen)?;
+    dict.set_item("last_confirmed", p.last_confirmed)?;
+    dict.set_item("occurrence_count", p.occurrence_count)?;
     Ok(dict.into())
 }
 

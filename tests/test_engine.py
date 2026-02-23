@@ -241,6 +241,7 @@ class TestStats:
             "active_memories", "consolidated_memories", "tombstoned_memories",
             "edges", "entities", "operations",
             "open_conflicts", "resolved_conflicts",
+            "pending_triggers", "active_patterns",
         }
         assert set(s.keys()) == expected_keys
 

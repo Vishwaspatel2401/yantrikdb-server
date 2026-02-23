@@ -6,7 +6,7 @@ use rusqlite::{params, Connection};
 
 use crate::error::{AidbError, Result};
 use crate::hlc::{HLCTimestamp, HLC};
-use crate::schema::{MIGRATE_V1_TO_V2, MIGRATE_V2_TO_V3, SCHEMA_SQL, SCHEMA_VERSION};
+use crate::schema::{MIGRATE_V1_TO_V2, MIGRATE_V2_TO_V3, MIGRATE_V3_TO_V4, SCHEMA_SQL, SCHEMA_VERSION};
 use crate::scoring;
 use crate::serde_helpers::serialize_f32;
 use crate::types::*;
@@ -58,12 +58,14 @@ impl AIDB {
         let existing_version = Self::get_schema_version(&conn);
 
         if existing_version == Some(1) {
-            // Migrate V1 -> V2 -> V3
             conn.execute_batch(MIGRATE_V1_TO_V2)?;
             conn.execute_batch(MIGRATE_V2_TO_V3)?;
+            conn.execute_batch(MIGRATE_V3_TO_V4)?;
         } else if existing_version == Some(2) {
-            // Migrate V2 -> V3
             conn.execute_batch(MIGRATE_V2_TO_V3)?;
+            conn.execute_batch(MIGRATE_V3_TO_V4)?;
+        } else if existing_version == Some(3) {
+            conn.execute_batch(MIGRATE_V3_TO_V4)?;
         }
 
         conn.execute_batch(SCHEMA_SQL)?;
@@ -622,6 +624,14 @@ impl AIDB {
             "SELECT COUNT(*) FROM conflicts WHERE status IN ('resolved', 'dismissed')",
             [], |row| row.get(0),
         )?;
+        let pending_triggers = self.conn.query_row(
+            "SELECT COUNT(*) FROM trigger_log WHERE status = 'pending'",
+            [], |row| row.get(0),
+        )?;
+        let active_patterns = self.conn.query_row(
+            "SELECT COUNT(*) FROM patterns WHERE status = 'active'",
+            [], |row| row.get(0),
+        )?;
 
         Ok(Stats {
             active_memories: active,
@@ -632,6 +642,8 @@ impl AIDB {
             operations,
             open_conflicts,
             resolved_conflicts,
+            pending_triggers,
+            active_patterns,
         })
     }
 
@@ -1042,6 +1054,240 @@ impl AIDB {
         })
     }
 
+    // ── Cognition loop (V3) ──
+
+    /// Run the full cognition loop: trigger detection, consolidation, conflict
+    /// scanning, and pattern mining. Returns a prioritized list of triggers
+    /// and summary of actions taken.
+    pub fn think(&self, config: &ThinkConfig) -> Result<ThinkResult> {
+        let start = std::time::Instant::now();
+        let ts = now();
+
+        // Phase 0: Expire old triggers
+        let expired = crate::triggers::expire_triggers(self, ts)?;
+
+        // Phase 1: Run all trigger checks
+        let mut all_triggers = Vec::new();
+        all_triggers.extend(crate::triggers::check_decay_triggers(
+            self,
+            config.importance_threshold,
+            config.decay_threshold,
+            config.max_triggers,
+        )?);
+        all_triggers.extend(crate::triggers::check_consolidation_triggers(
+            self,
+            config.min_active_memories,
+        )?);
+        all_triggers.extend(crate::triggers::check_conflict_escalation(self)?);
+        all_triggers.extend(crate::triggers::check_temporal_drift(self)?);
+        all_triggers.extend(crate::triggers::check_redundancy(self, config.consolidation_sim_threshold)?);
+        all_triggers.extend(crate::triggers::check_relationship_insight(self)?);
+        all_triggers.extend(crate::triggers::check_valence_trend(self)?);
+        all_triggers.extend(crate::triggers::check_entity_anomaly(self)?);
+
+        // Phase 2: Run consolidation if configured
+        let consolidation_count = if config.run_consolidation {
+            let stats = self.stats()?;
+            if stats.active_memories >= config.min_active_memories {
+                let results = crate::consolidate::consolidate(
+                    self,
+                    config.consolidation_sim_threshold,
+                    config.consolidation_time_window_days,
+                    config.consolidation_min_cluster,
+                    false,
+                )?;
+                results.len()
+            } else {
+                0
+            }
+        } else {
+            0
+        };
+
+        // Phase 3: Scan for conflicts
+        let conflicts_found = if config.run_conflict_scan {
+            crate::conflict::scan_conflicts(self)?.len()
+        } else {
+            0
+        };
+
+        // Phase 4: Mine patterns
+        let pattern_result = if config.run_pattern_mining {
+            crate::patterns::mine_patterns(self, &PatternConfig::default())?
+        } else {
+            PatternMiningResult {
+                new_patterns: 0,
+                updated_patterns: 0,
+                stale_patterns: 0,
+            }
+        };
+
+        // Phase 5: Generate pattern_discovered triggers for new patterns
+        if pattern_result.new_patterns > 0 {
+            let new_patterns = crate::patterns::get_patterns(self, None, Some("active"), 5)?;
+            for p in new_patterns {
+                let mut context = std::collections::HashMap::new();
+                context.insert("pattern_type".to_string(), serde_json::json!(p.pattern_type));
+                context.insert("confidence".to_string(), serde_json::json!(p.confidence));
+                context.insert("description".to_string(), serde_json::json!(p.description));
+
+                all_triggers.push(Trigger {
+                    trigger_type: "pattern_discovered".to_string(),
+                    reason: format!("New pattern discovered: {}", p.description),
+                    urgency: p.confidence * 0.5,
+                    source_rids: p.evidence_rids,
+                    suggested_action: "explore_pattern".to_string(),
+                    context,
+                });
+            }
+        }
+
+        // Phase 6: Deduplicate, cooldown-filter, persist triggers
+        let filtered = crate::triggers::filter_and_persist_triggers(self, all_triggers, ts)?;
+
+        // Phase 7: Sort by urgency, truncate
+        let mut final_triggers = filtered;
+        final_triggers.sort_by(|a, b| {
+            b.urgency
+                .partial_cmp(&a.urgency)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        final_triggers.truncate(config.max_triggers);
+
+        // Record last_think_at
+        self.conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('last_think_at', ?1)",
+            params![ts.to_string()],
+        )?;
+
+        // Log think op (informational, not materialized on remote)
+        self.log_op(
+            "think",
+            None,
+            &serde_json::json!({
+                "triggers_count": final_triggers.len(),
+                "consolidation_count": consolidation_count,
+                "conflicts_found": conflicts_found,
+                "new_patterns": pattern_result.new_patterns,
+            }),
+            None,
+        )?;
+
+        let duration_ms = start.elapsed().as_millis() as u64;
+
+        Ok(ThinkResult {
+            triggers: final_triggers,
+            consolidation_count,
+            conflicts_found,
+            patterns_new: pattern_result.new_patterns,
+            patterns_updated: pattern_result.updated_patterns,
+            expired_triggers: expired,
+            duration_ms,
+        })
+    }
+
+    // ── Trigger lifecycle API ──
+
+    /// Mark a trigger as delivered (surfaced to host app).
+    pub fn deliver_trigger(&self, trigger_id: &str) -> Result<bool> {
+        let ts = now();
+        let changes = self.conn.execute(
+            "UPDATE trigger_log SET status = 'delivered', delivered_at = ?1 \
+             WHERE trigger_id = ?2 AND status = 'pending'",
+            params![ts, trigger_id],
+        )?;
+        if changes > 0 {
+            self.log_op(
+                "trigger_deliver",
+                Some(trigger_id),
+                &serde_json::json!({"trigger_id": trigger_id, "delivered_at": ts}),
+                None,
+            )?;
+        }
+        Ok(changes > 0)
+    }
+
+    /// Mark a trigger as acknowledged (user saw it).
+    pub fn acknowledge_trigger(&self, trigger_id: &str) -> Result<bool> {
+        let ts = now();
+        let changes = self.conn.execute(
+            "UPDATE trigger_log SET status = 'acknowledged', acknowledged_at = ?1 \
+             WHERE trigger_id = ?2 AND status = 'delivered'",
+            params![ts, trigger_id],
+        )?;
+        if changes > 0 {
+            self.log_op(
+                "trigger_ack",
+                Some(trigger_id),
+                &serde_json::json!({"trigger_id": trigger_id, "acknowledged_at": ts}),
+                None,
+            )?;
+        }
+        Ok(changes > 0)
+    }
+
+    /// Mark a trigger as acted upon.
+    pub fn act_on_trigger(&self, trigger_id: &str) -> Result<bool> {
+        let ts = now();
+        let changes = self.conn.execute(
+            "UPDATE trigger_log SET status = 'acted', acted_at = ?1 \
+             WHERE trigger_id = ?2 AND status IN ('delivered', 'acknowledged')",
+            params![ts, trigger_id],
+        )?;
+        if changes > 0 {
+            self.log_op(
+                "trigger_act",
+                Some(trigger_id),
+                &serde_json::json!({"trigger_id": trigger_id, "acted_at": ts}),
+                None,
+            )?;
+        }
+        Ok(changes > 0)
+    }
+
+    /// Dismiss a trigger (user doesn't want to act on it).
+    pub fn dismiss_trigger(&self, trigger_id: &str) -> Result<bool> {
+        let ts = now();
+        let changes = self.conn.execute(
+            "UPDATE trigger_log SET status = 'dismissed', acted_at = ?1 \
+             WHERE trigger_id = ?2 AND status IN ('pending', 'delivered', 'acknowledged')",
+            params![ts, trigger_id],
+        )?;
+        if changes > 0 {
+            self.log_op(
+                "trigger_dismiss",
+                Some(trigger_id),
+                &serde_json::json!({"trigger_id": trigger_id, "dismissed_at": ts}),
+                None,
+            )?;
+        }
+        Ok(changes > 0)
+    }
+
+    /// Get pending triggers sorted by urgency.
+    pub fn get_pending_triggers(&self, limit: usize) -> Result<Vec<PersistedTrigger>> {
+        crate::triggers::get_pending_triggers(self, limit)
+    }
+
+    /// Get trigger history with optional type filter.
+    pub fn get_trigger_history(
+        &self,
+        trigger_type: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<PersistedTrigger>> {
+        crate::triggers::get_trigger_history(self, trigger_type, limit)
+    }
+
+    /// Get detected patterns.
+    pub fn get_patterns(
+        &self,
+        pattern_type: Option<&str>,
+        status: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<Pattern>> {
+        crate::patterns::get_patterns(self, pattern_type, status, limit)
+    }
+
     /// Close the database connection. After this, the engine cannot be used.
     pub fn close(self) -> Result<()> {
         self.conn.close().map_err(|(_, e)| AidbError::Database(e))
@@ -1351,5 +1597,118 @@ mod tests {
         let s = db.stats().unwrap();
         assert_eq!(s.open_conflicts, 1);
         assert_eq!(s.resolved_conflicts, 0);
+    }
+
+    // ── V3 Cognition tests ──
+
+    #[test]
+    fn test_schema_v4_has_trigger_log_and_patterns() {
+        let db = AIDB::new(":memory:", 8).unwrap();
+        let count: i64 = db.conn().query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('trigger_log', 'patterns')",
+            [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn test_think_empty_db() {
+        let db = AIDB::new(":memory:", 8).unwrap();
+        let config = ThinkConfig {
+            run_consolidation: false,
+            run_conflict_scan: false,
+            run_pattern_mining: false,
+            ..Default::default()
+        };
+        let result = db.think(&config).unwrap();
+        assert!(result.triggers.is_empty());
+        assert_eq!(result.consolidation_count, 0);
+        assert_eq!(result.conflicts_found, 0);
+        assert!(result.duration_ms < 5000);
+    }
+
+    #[test]
+    fn test_think_with_decayed_memories() {
+        let db = AIDB::new(":memory:", 8).unwrap();
+        let rid = db.record("important deadline", "episodic", 0.9, 0.0, 100.0, &empty_meta(), &vec_seed(1.0, 8)).unwrap();
+
+        // Backdate last_access
+        let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
+        db.conn().execute(
+            "UPDATE memories SET last_access = ?1 WHERE rid = ?2",
+            rusqlite::params![ts - 10000.0, rid],
+        ).unwrap();
+
+        let config = ThinkConfig {
+            run_consolidation: false,
+            run_conflict_scan: false,
+            run_pattern_mining: false,
+            ..Default::default()
+        };
+        let result = db.think(&config).unwrap();
+        assert!(!result.triggers.is_empty());
+        assert_eq!(result.triggers[0].trigger_type, "decay_review");
+    }
+
+    #[test]
+    fn test_think_records_last_think_at() {
+        let db = AIDB::new(":memory:", 8).unwrap();
+        let config = ThinkConfig {
+            run_consolidation: false,
+            run_conflict_scan: false,
+            run_pattern_mining: false,
+            ..Default::default()
+        };
+        db.think(&config).unwrap();
+
+        let val: String = db.conn().query_row(
+            "SELECT value FROM meta WHERE key = 'last_think_at'",
+            [], |row| row.get(0),
+        ).unwrap();
+        let ts: f64 = val.parse().unwrap();
+        assert!(ts > 0.0);
+    }
+
+    #[test]
+    fn test_trigger_lifecycle() {
+        let db = AIDB::new(":memory:", 8).unwrap();
+
+        // Create a trigger via persistence
+        let trigger = crate::types::Trigger {
+            trigger_type: "decay_review".to_string(),
+            reason: "test".to_string(),
+            urgency: 0.8,
+            source_rids: vec!["rid-1".to_string()],
+            suggested_action: "test".to_string(),
+            context: std::collections::HashMap::new(),
+        };
+        let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
+        let tid = crate::triggers::persist_trigger(&db, &trigger, ts).unwrap().unwrap();
+
+        // Verify pending
+        let pending = db.get_pending_triggers(10).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].status, "pending");
+
+        // Deliver
+        assert!(db.deliver_trigger(&tid).unwrap());
+        let history = db.get_trigger_history(None, 10).unwrap();
+        assert_eq!(history[0].status, "delivered");
+
+        // Acknowledge
+        assert!(db.acknowledge_trigger(&tid).unwrap());
+
+        // Act
+        assert!(db.act_on_trigger(&tid).unwrap());
+        let history = db.get_trigger_history(None, 10).unwrap();
+        assert_eq!(history[0].status, "acted");
+    }
+
+    #[test]
+    fn test_stats_include_triggers_and_patterns() {
+        let db = AIDB::new(":memory:", 8).unwrap();
+        let s = db.stats().unwrap();
+        assert_eq!(s.pending_triggers, 0);
+        assert_eq!(s.active_patterns, 0);
     }
 }

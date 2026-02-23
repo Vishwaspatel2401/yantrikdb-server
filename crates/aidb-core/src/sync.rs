@@ -425,4 +425,101 @@ mod tests {
         assert!(!b_conflicts.is_empty());
         assert_eq!(b_conflicts[0].conflict_type, "preference");
     }
+
+    // ── V3 sync tests ──
+
+    #[test]
+    fn test_trigger_replicates_across_devices() {
+        let a = AIDB::new_with_actor(":memory:", 8, "A").unwrap();
+        let b = AIDB::new_with_actor(":memory:", 8, "B").unwrap();
+
+        // Fire a trigger on A
+        let trigger = crate::types::Trigger {
+            trigger_type: "decay_review".to_string(),
+            reason: "important memory decaying".to_string(),
+            urgency: 0.8,
+            source_rids: vec!["rid-1".to_string()],
+            suggested_action: "ask_user".to_string(),
+            context: std::collections::HashMap::new(),
+        };
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+        crate::triggers::persist_trigger(&a, &trigger, ts).unwrap();
+
+        // Sync A -> B
+        sync_bidirectional(&a, &b).unwrap();
+
+        // B should have the trigger
+        let b_triggers = b.get_pending_triggers(10).unwrap();
+        assert_eq!(b_triggers.len(), 1);
+        assert_eq!(b_triggers[0].trigger_type, "decay_review");
+    }
+
+    #[test]
+    fn test_trigger_lifecycle_replicates() {
+        let a = AIDB::new_with_actor(":memory:", 8, "A").unwrap();
+        let b = AIDB::new_with_actor(":memory:", 8, "B").unwrap();
+
+        // Fire trigger on A
+        let trigger = crate::types::Trigger {
+            trigger_type: "consolidation_ready".to_string(),
+            reason: "test".to_string(),
+            urgency: 0.6,
+            source_rids: vec![],
+            suggested_action: "run_consolidation".to_string(),
+            context: std::collections::HashMap::new(),
+        };
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+        let tid = crate::triggers::persist_trigger(&a, &trigger, ts)
+            .unwrap()
+            .unwrap();
+
+        // Sync A -> B (trigger arrives)
+        sync_bidirectional(&a, &b).unwrap();
+
+        // Dismiss on A
+        a.dismiss_trigger(&tid).unwrap();
+
+        // Sync again
+        sync_bidirectional(&a, &b).unwrap();
+
+        // B should see it dismissed
+        let b_triggers = b.get_trigger_history(None, 10).unwrap();
+        assert_eq!(b_triggers.len(), 1);
+        assert_eq!(b_triggers[0].status, "dismissed");
+    }
+
+    #[test]
+    fn test_pattern_replicates() {
+        let a = AIDB::new_with_actor(":memory:", 8, "A").unwrap();
+        let b = AIDB::new_with_actor(":memory:", 8, "B").unwrap();
+
+        // Create a hub pattern on A via edges
+        for i in 0..6 {
+            a.relate("Alice", &format!("target_{i}"), &format!("rel_{i}"), 1.0)
+                .unwrap();
+        }
+        let config = crate::types::PatternConfig {
+            entity_hub_min_degree: 5,
+            ..Default::default()
+        };
+        crate::patterns::mine_patterns(&a, &config).unwrap();
+
+        // A should have a pattern
+        let a_patterns = a.get_patterns(Some("entity_hub"), None, 10).unwrap();
+        assert!(!a_patterns.is_empty());
+
+        // Sync to B
+        sync_bidirectional(&a, &b).unwrap();
+
+        // B should have the pattern
+        let b_patterns = b.get_patterns(Some("entity_hub"), None, 10).unwrap();
+        assert!(!b_patterns.is_empty());
+        assert!(b_patterns[0].description.contains("Alice"));
+    }
 }
