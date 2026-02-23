@@ -1,0 +1,12 @@
+.mcp.json
+.tracker.db
+.tracker.db-shm
+.tracker.db-wal
+.env
+node_modules/
+target/
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+.pytest_cache/
