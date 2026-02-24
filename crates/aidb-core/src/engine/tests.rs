@@ -808,3 +808,64 @@ fn test_evict_no_action_when_under_limit() {
     let archived = db.evict(10).unwrap();
     assert!(archived.is_empty());
 }
+
+#[test]
+fn test_query_builder_basic() {
+    let db = AIDB::new(":memory:", 8).unwrap();
+    for i in 0..10 {
+        db.record(&format!("memory {i}"), "episodic", 0.5, 0.0, 604800.0,
+            &empty_meta(), &vec_seed(i as f32, 8), "default").unwrap();
+    }
+
+    let results = db.query(
+        RecallQuery::new(vec_seed(0.0, 8))
+            .top_k(3)
+            .skip_reinforce()
+    ).unwrap();
+    assert_eq!(results.len(), 3);
+}
+
+#[test]
+fn test_query_builder_with_filters() {
+    let db = AIDB::new(":memory:", 8).unwrap();
+    db.record("episodic one", "episodic", 0.5, 0.0, 604800.0,
+        &empty_meta(), &vec_seed(1.0, 8), "work").unwrap();
+    db.record("semantic one", "semantic", 0.5, 0.0, 604800.0,
+        &empty_meta(), &vec_seed(2.0, 8), "work").unwrap();
+    db.record("episodic two", "episodic", 0.5, 0.0, 604800.0,
+        &empty_meta(), &vec_seed(3.0, 8), "personal").unwrap();
+
+    // Filter by type + namespace
+    let results = db.query(
+        RecallQuery::new(vec_seed(1.0, 8))
+            .top_k(10)
+            .memory_type("episodic")
+            .namespace("work")
+            .skip_reinforce()
+    ).unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].memory_type, "episodic");
+    assert_eq!(results[0].namespace, "work");
+}
+
+#[test]
+fn test_query_builder_contributions_present() {
+    let db = AIDB::new(":memory:", 8).unwrap();
+    db.record("test mem", "episodic", 0.8, 0.5, 604800.0,
+        &empty_meta(), &vec_seed(1.0, 8), "default").unwrap();
+
+    let results = db.query(
+        RecallQuery::new(vec_seed(1.0, 8))
+            .top_k(1)
+            .skip_reinforce()
+    ).unwrap();
+    assert_eq!(results.len(), 1);
+
+    let r = &results[0];
+    // Verify explainability fields
+    assert!(r.scores.valence_multiplier >= 1.0);
+    assert!(r.scores.contributions.similarity >= 0.0);
+    assert!(r.scores.contributions.decay >= 0.0);
+    assert!(r.scores.contributions.recency >= 0.0);
+    assert!(r.scores.contributions.importance >= 0.0);
+}

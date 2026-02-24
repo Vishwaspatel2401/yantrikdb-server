@@ -97,6 +97,15 @@ class TestRecall:
         assert "decay" in r["scores"]
         assert "recency" in r["scores"]
         assert "why_retrieved" in r
+        # Explainability: contributions and valence_multiplier
+        assert "valence_multiplier" in r["scores"]
+        assert r["scores"]["valence_multiplier"] >= 1.0
+        assert "contributions" in r["scores"]
+        c = r["scores"]["contributions"]
+        assert "similarity" in c and "decay" in c and "recency" in c
+        assert "importance" in c and "graph_proximity" in c
+        # Contributions should be non-negative weighted signals
+        assert all(v >= 0.0 for v in c.values())
 
     def test_recall_respects_top_k(self, db):
         for i in range(20):
@@ -571,3 +580,48 @@ class TestNamespace:
         result = db.correct(rid, new_text="corrected", embedding=_vec(1.1))
         corrected = db.get(result["corrected_rid"])
         assert corrected["namespace"] == "my-ns"
+
+
+class TestQueryBuilder:
+    """Tests for the composable query() API."""
+
+    @pytest.fixture
+    def db(self, tmp_path):
+        return AIDB(str(tmp_path / "query_test.db"), embedding_dim=DIM)
+
+    def test_query_basic(self, db):
+        for i in range(10):
+            db.record(f"memory {i}", embedding=_vec(float(i)))
+        results = db.query(embedding=_vec(0.0), top_k=3, skip_reinforce=True)
+        assert len(results) == 3
+        assert all("score" in r for r in results)
+
+    def test_query_with_type_filter(self, db):
+        db.record("ep", memory_type="episodic", embedding=_vec(1.0))
+        db.record("sem", memory_type="semantic", embedding=_vec(1.1))
+        results = db.query(
+            embedding=_vec(1.0), top_k=10,
+            memory_type="episodic", skip_reinforce=True,
+        )
+        assert len(results) == 1
+        assert results[0]["type"] == "episodic"
+
+    def test_query_with_namespace_filter(self, db):
+        db.record("work mem", embedding=_vec(1.0), namespace="work")
+        db.record("personal mem", embedding=_vec(1.1), namespace="personal")
+        results = db.query(
+            embedding=_vec(1.0), top_k=10,
+            namespace="work", skip_reinforce=True,
+        )
+        assert len(results) == 1
+        assert results[0]["namespace"] == "work"
+
+    def test_query_contributions_present(self, db):
+        db.record("test", embedding=_vec(1.0), importance=0.8, valence=0.5)
+        results = db.query(embedding=_vec(1.0), top_k=1, skip_reinforce=True)
+        assert len(results) == 1
+        scores = results[0]["scores"]
+        assert "contributions" in scores
+        assert "valence_multiplier" in scores
+        c = scores["contributions"]
+        assert all(k in c for k in ["similarity", "decay", "recency", "importance", "graph_proximity"])

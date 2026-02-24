@@ -7,6 +7,7 @@ use super::{now, AIDB};
 
 impl AIDB {
     /// Create or update a relationship between entities.
+    #[tracing::instrument(skip(self))]
     pub fn relate(
         &self,
         src: &str,

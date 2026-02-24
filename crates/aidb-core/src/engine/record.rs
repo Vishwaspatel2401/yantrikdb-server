@@ -8,6 +8,7 @@ use super::{now, embedding_hash, AIDB};
 
 impl AIDB {
     /// Store a new memory and return its RID.
+    #[tracing::instrument(skip(self, metadata, embedding), fields(memory_type, namespace))]
     pub fn record(
         &self,
         text: &str,
@@ -71,6 +72,7 @@ impl AIDB {
 
     /// Record multiple memories in a single transaction.
     /// Uses SAVEPOINT for atomicity while keeping `&self` (no `&mut self`).
+    #[tracing::instrument(skip(self, inputs), fields(batch_size = inputs.len()))]
     pub fn record_batch(&self, inputs: &[RecordInput]) -> Result<Vec<String>> {
         if inputs.is_empty() {
             return Ok(vec![]);

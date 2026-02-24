@@ -12,6 +12,7 @@ impl AIDB {
     /// Retrieve memories using multi-signal fusion scoring.
     /// When `expand_entities` is true, graph edges are followed to pull in
     /// entity-connected memories that pure vector search would miss.
+    #[tracing::instrument(skip(self, query_embedding), fields(top_k, expand_entities, namespace))]
     pub fn recall(
         &self,
         query_embedding: &[f32],
@@ -28,7 +29,10 @@ impl AIDB {
 
         // Step 1: Vector candidate generation via HNSW
         let fetch_k = (top_k * 5).min(200);
-        let vec_results = self.vec_index.borrow().search(query_embedding, fetch_k)?;
+        let vec_results = {
+            let _span = tracing::debug_span!("hnsw_search", fetch_k).entered();
+            self.vec_index.borrow().search(query_embedding, fetch_k)?
+        };
 
         if vec_results.is_empty() {
             return Ok(vec![]);
@@ -71,6 +75,8 @@ impl AIDB {
                 let recency = scoring::recency_score(age);
                 let composite = scoring::composite_score(sim_score, decay, recency, row.importance, row.valence);
                 let why = scoring::build_why(sim_score, recency, decay, row.valence);
+                let contributions = scoring::standard_contributions(sim_score, decay, recency, row.importance);
+                let valence_multiplier = scoring::valence_boost(row.valence);
 
                 scored.push(RecallResult {
                     rid: rid.clone(),
@@ -86,6 +92,8 @@ impl AIDB {
                         recency,
                         importance: row.importance,
                         graph_proximity: 0.0,
+                        contributions,
+                        valence_multiplier,
                     },
                     why_retrieved: why,
                     metadata: serde_json::Value::Null,  // hydrated after top_k selection
@@ -96,6 +104,7 @@ impl AIDB {
 
         // Step 3: Graph expansion (when enabled)
         if expand_entities {
+            let _span = tracing::debug_span!("graph_expansion").entered();
             let gi = self.graph_index.borrow();
             let query_entities: Vec<(String, String, u32)> = if let Some(qt) = query_text {
                 let query_tokens = crate::graph::tokenize(qt);
@@ -240,6 +249,8 @@ impl AIDB {
                         let composite = scoring::graph_composite_score(
                             sim_score, decay, recency, row.importance, row.valence, prox,
                         );
+                        let contributions = scoring::graph_contributions(sim_score, decay, recency, row.importance, prox);
+                        let valence_multiplier = scoring::valence_boost(row.valence);
 
                         let mut why = scoring::build_why(sim_score, recency, decay, row.valence);
                         let mem_entities: Vec<String> = gi.entities_for_memory(rid).into_iter().map(|s| s.to_string()).collect();
@@ -264,6 +275,8 @@ impl AIDB {
                                 recency,
                                 importance: row.importance,
                                 graph_proximity: prox,
+                                contributions,
+                                valence_multiplier,
                             },
                             why_retrieved: why,
                             metadata: serde_json::Value::Null,
@@ -281,7 +294,10 @@ impl AIDB {
 
         // Step 5: Hydrate final top_k with text + metadata from SQLite
         let final_rids: Vec<&str> = scored.iter().map(|r| r.rid.as_str()).collect();
-        let text_meta = self.fetch_text_metadata_by_rids(&final_rids)?;
+        let text_meta = {
+            let _span = tracing::debug_span!("hydrate", count = final_rids.len()).entered();
+            self.fetch_text_metadata_by_rids(&final_rids)?
+        };
         for result in &mut scored {
             if let Some(tm) = text_meta.get(&result.rid) {
                 result.text = tm.text.clone();
@@ -298,6 +314,29 @@ impl AIDB {
         }
 
         Ok(scored)
+    }
+
+    /// Execute a recall query built with the `RecallQuery` builder.
+    ///
+    /// ```rust,ignore
+    /// let results = db.query(embedding)
+    ///     .top_k(10)
+    ///     .memory_type("episodic")
+    ///     .namespace("work")
+    ///     .execute(&db)?;
+    /// ```
+    pub fn query(&self, q: RecallQuery) -> Result<Vec<RecallResult>> {
+        self.recall(
+            &q.embedding,
+            q.top_k,
+            q.time_window,
+            q.memory_type.as_deref(),
+            q.include_consolidated,
+            q.expand_entities,
+            q.query_text.as_deref(),
+            q.skip_reinforce,
+            q.namespace.as_deref(),
+        )
     }
 
     /// Profiled version of recall() that returns per-phase timing breakdown.
@@ -376,6 +415,8 @@ impl AIDB {
                     let recency = scoring::recency_score(age);
                     let composite = scoring::composite_score(sim_score, decay, recency, row.importance, row.valence);
                     let why = scoring::build_why(sim_score, recency, decay, row.valence);
+                    let contributions = scoring::standard_contributions(sim_score, decay, recency, row.importance);
+                    let valence_multiplier = scoring::valence_boost(row.valence);
 
                     scored.push(RecallResult {
                         rid: rid.clone(),
@@ -391,9 +432,12 @@ impl AIDB {
                             recency,
                             importance: row.importance,
                             graph_proximity: 0.0,
+                            contributions,
+                            valence_multiplier,
                         },
                         why_retrieved: why,
                         metadata: serde_json::Value::Object(Default::default()),
+                        namespace: row.namespace.clone(),
                     });
                 }
             }
@@ -533,6 +577,9 @@ impl AIDB {
                                 }
                             }
 
+                            let contributions = scoring::graph_contributions(sim_score, decay, recency, row.importance, prox);
+                            let valence_multiplier = scoring::valence_boost(row.valence);
+
                             scored.push(RecallResult {
                                 rid: rid.clone(),
                                 memory_type: row.memory_type.clone(),
@@ -547,9 +594,12 @@ impl AIDB {
                                     recency,
                                     importance: row.importance,
                                     graph_proximity: prox,
+                                    contributions,
+                                    valence_multiplier,
                                 },
                                 why_retrieved: why,
                                 metadata: serde_json::Value::Object(Default::default()),
+                                namespace: row.namespace.clone(),
                             });
                         }
                     }

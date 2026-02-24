@@ -37,6 +37,16 @@ pub fn recall_result_to_dict(py: Python<'_>, r: &aidb_core::RecallResult) -> PyR
     scores.set_item("recency", r.scores.recency)?;
     scores.set_item("importance", r.scores.importance)?;
     scores.set_item("graph_proximity", r.scores.graph_proximity)?;
+    scores.set_item("valence_multiplier", r.scores.valence_multiplier)?;
+
+    let contributions = PyDict::new(py);
+    contributions.set_item("similarity", r.scores.contributions.similarity)?;
+    contributions.set_item("decay", r.scores.contributions.decay)?;
+    contributions.set_item("recency", r.scores.contributions.recency)?;
+    contributions.set_item("importance", r.scores.contributions.importance)?;
+    contributions.set_item("graph_proximity", r.scores.contributions.graph_proximity)?;
+    scores.set_item("contributions", contributions)?;
+
     dict.set_item("scores", scores)?;
 
     let why: Vec<&str> = r.why_retrieved.iter().map(|s| s.as_str()).collect();

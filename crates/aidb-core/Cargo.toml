@@ -13,6 +13,7 @@ blake3 = "1"
 hex = "0.4"
 rand = { version = "0.8", features = ["small_rng"] }
 zstd = "0.13"
+tracing = "0.1"
 
 [features]
 default = []

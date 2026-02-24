@@ -8,6 +8,7 @@ use super::{now, AIDB};
 impl AIDB {
     /// Archive a hot memory to cold storage (compress embedding, remove from vec index).
     /// Returns true if the memory was archived, false if not found or already cold.
+    #[tracing::instrument(skip(self))]
     pub fn archive(&self, rid: &str) -> Result<bool> {
         let row = self.conn.query_row(
             "SELECT embedding FROM memories WHERE rid = ?1 AND storage_tier = 'hot' AND consolidation_status = 'active'",
@@ -47,6 +48,7 @@ impl AIDB {
 
     /// Hydrate a cold memory back to hot storage (decompress embedding, re-insert into vec index).
     /// Returns true if the memory was hydrated, false if not found or already hot.
+    #[tracing::instrument(skip(self))]
     pub fn hydrate(&self, rid: &str) -> Result<bool> {
         let row = self.conn.query_row(
             "SELECT embedding FROM memories WHERE rid = ?1 AND storage_tier = 'cold'",
@@ -87,6 +89,7 @@ impl AIDB {
     /// Evict memories to cold storage based on decay scores.
     /// Archives the lowest-scoring memories until at most `max_active` hot memories remain.
     /// Returns the list of archived RIDs.
+    #[tracing::instrument(skip(self))]
     pub fn evict(&self, max_active: usize) -> Result<Vec<String>> {
         let hot_count: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM memories WHERE consolidation_status = 'active' AND storage_tier = 'hot'",

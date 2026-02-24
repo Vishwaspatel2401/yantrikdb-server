@@ -11,6 +11,7 @@ impl AIDB {
     /// Run the full cognition loop: trigger detection, consolidation, conflict
     /// scanning, and pattern mining. Returns a prioritized list of triggers
     /// and summary of actions taken.
+    #[tracing::instrument(skip(self, config))]
     pub fn think(&self, config: &ThinkConfig) -> Result<ThinkResult> {
         let start = std::time::Instant::now();
         let ts = now();

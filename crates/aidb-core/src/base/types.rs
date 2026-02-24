@@ -27,6 +27,20 @@ pub struct ScoreBreakdown {
     pub recency: f64,
     pub importance: f64,
     pub graph_proximity: f64,
+    /// Weighted contribution of each signal to the final score.
+    pub contributions: ScoreContributions,
+    /// Valence multiplier applied to the raw score.
+    pub valence_multiplier: f64,
+}
+
+/// Weighted contributions of each signal (signal_value * weight).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScoreContributions {
+    pub similarity: f64,
+    pub decay: f64,
+    pub recency: f64,
+    pub importance: f64,
+    pub graph_proximity: f64,
 }
 
 /// A recall result with scoring information.
@@ -435,6 +449,90 @@ pub struct RecallTimings {
 pub struct RecallProfiledResult {
     pub results: Vec<RecallResult>,
     pub timings: RecallTimings,
+}
+
+/// Builder for composable recall queries.
+///
+/// ```rust,ignore
+/// let results = db.query(embedding)
+///     .top_k(10)
+///     .memory_type("episodic")
+///     .namespace("work")
+///     .expand_entities("tell me about Alice")
+///     .time_window(start, end)
+///     .execute()?;
+/// ```
+#[derive(Debug, Clone)]
+pub struct RecallQuery {
+    pub embedding: Vec<f32>,
+    pub top_k: usize,
+    pub time_window: Option<(f64, f64)>,
+    pub memory_type: Option<String>,
+    pub include_consolidated: bool,
+    pub expand_entities: bool,
+    pub query_text: Option<String>,
+    pub skip_reinforce: bool,
+    pub namespace: Option<String>,
+}
+
+impl RecallQuery {
+    /// Create a new query builder with the given embedding vector.
+    pub fn new(embedding: Vec<f32>) -> Self {
+        Self {
+            embedding,
+            top_k: 10,
+            time_window: None,
+            memory_type: None,
+            include_consolidated: false,
+            expand_entities: false,
+            query_text: None,
+            skip_reinforce: false,
+            namespace: None,
+        }
+    }
+
+    /// Set maximum number of results to return.
+    pub fn top_k(mut self, k: usize) -> Self {
+        self.top_k = k;
+        self
+    }
+
+    /// Filter by memory type (e.g., "episodic", "semantic", "procedural").
+    pub fn memory_type(mut self, mt: &str) -> Self {
+        self.memory_type = Some(mt.to_string());
+        self
+    }
+
+    /// Filter by namespace.
+    pub fn namespace(mut self, ns: &str) -> Self {
+        self.namespace = Some(ns.to_string());
+        self
+    }
+
+    /// Restrict results to a time window (created_at between start and end).
+    pub fn time_window(mut self, start: f64, end: f64) -> Self {
+        self.time_window = Some((start, end));
+        self
+    }
+
+    /// Enable graph expansion with the given query text for entity extraction.
+    pub fn expand_entities(mut self, query_text: &str) -> Self {
+        self.expand_entities = true;
+        self.query_text = Some(query_text.to_string());
+        self
+    }
+
+    /// Include consolidated (merged) memories in results.
+    pub fn include_consolidated(mut self) -> Self {
+        self.include_consolidated = true;
+        self
+    }
+
+    /// Skip spaced-repetition reinforcement on accessed memories.
+    pub fn skip_reinforce(mut self) -> Self {
+        self.skip_reinforce = true;
+        self
+    }
 }
 
 impl Default for PatternConfig {

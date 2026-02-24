@@ -75,6 +75,58 @@ impl PyAIDB {
             .collect()
     }
 
+    /// Query builder API: composable recall with keyword arguments.
+    ///
+    /// ```python
+    /// results = db.query(
+    ///     embedding=emb,
+    ///     top_k=10,
+    ///     memory_type="episodic",
+    ///     namespace="work",
+    /// )
+    /// ```
+    #[pyo3(signature = (
+        query=None, embedding=None, top_k=10, memory_type=None, namespace=None,
+        time_window=None, expand_entities=false, include_consolidated=false,
+        skip_reinforce=false
+    ))]
+    fn query(
+        &self,
+        py: Python<'_>,
+        query: Option<&str>,
+        embedding: Option<Vec<f32>>,
+        top_k: usize,
+        memory_type: Option<&str>,
+        namespace: Option<&str>,
+        time_window: Option<(f64, f64)>,
+        expand_entities: bool,
+        include_consolidated: bool,
+        skip_reinforce: bool,
+    ) -> PyResult<Vec<PyObject>> {
+        let db = self.get_inner()?;
+
+        let emb = match embedding {
+            Some(e) => e,
+            None => match query {
+                Some(q) => self.embed(py, q)?,
+                None => return Err(PyValueError::new_err("Must provide either query or embedding")),
+            },
+        };
+
+        let mut q = aidb_core::RecallQuery::new(emb).top_k(top_k);
+        if let Some(mt) = memory_type { q = q.memory_type(mt); }
+        if let Some(ns) = namespace { q = q.namespace(ns); }
+        if let Some(tw) = time_window { q = q.time_window(tw.0, tw.1); }
+        if expand_entities {
+            q = q.expand_entities(query.unwrap_or(""));
+        }
+        if include_consolidated { q = q.include_consolidated(); }
+        if skip_reinforce { q = q.skip_reinforce(); }
+
+        let results = db.query(q).map_err(map_err)?;
+        results.iter().map(|r| recall_result_to_dict(py, r)).collect()
+    }
+
     fn get(&self, py: Python<'_>, rid: &str) -> PyResult<Option<PyObject>> {
         let db = self.get_inner()?;
         match db.get(rid).map_err(map_err)? {

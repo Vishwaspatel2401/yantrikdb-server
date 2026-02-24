@@ -21,6 +21,21 @@ pub fn valence_boost(valence: f64) -> f64 {
     1.0 + 0.3 * valence.abs()
 }
 
+/// Standard signal weights for recall scoring.
+pub const W_SIM: f64 = 0.40;
+pub const W_DECAY: f64 = 0.25;
+pub const W_RECENCY: f64 = 0.20;
+pub const W_IMPORTANCE: f64 = 0.15;
+
+/// Graph-expanded signal weights (when graph_proximity > 0).
+pub const GW_SIM: f64 = 0.30;
+pub const GW_DECAY: f64 = 0.20;
+pub const GW_RECENCY: f64 = 0.15;
+pub const GW_IMPORTANCE: f64 = 0.15;
+pub const GW_GRAPH: f64 = 0.20;
+
+use crate::types::ScoreContributions;
+
 /// Compute the composite recall score using multi-signal fusion.
 ///
 /// score = (0.40 * similarity + 0.25 * decay + 0.20 * recency + 0.15 * importance) * valence_boost
@@ -31,8 +46,24 @@ pub fn composite_score(
     importance: f64,
     valence: f64,
 ) -> f64 {
-    let raw = 0.40 * similarity + 0.25 * decay + 0.20 * recency + 0.15 * importance.min(1.0);
+    let raw = W_SIM * similarity + W_DECAY * decay + W_RECENCY * recency + W_IMPORTANCE * importance.min(1.0);
     raw * valence_boost(valence)
+}
+
+/// Compute weighted contributions for standard scoring.
+pub fn standard_contributions(
+    similarity: f64,
+    decay: f64,
+    recency: f64,
+    importance: f64,
+) -> ScoreContributions {
+    ScoreContributions {
+        similarity: W_SIM * similarity,
+        decay: W_DECAY * decay,
+        recency: W_RECENCY * recency,
+        importance: W_IMPORTANCE * importance.min(1.0),
+        graph_proximity: 0.0,
+    }
 }
 
 /// Compute the composite recall score with optional graph proximity signal.
@@ -50,12 +81,33 @@ pub fn graph_composite_score(
     graph_proximity: f64,
 ) -> f64 {
     let raw = if graph_proximity > 0.0 {
-        0.30 * similarity + 0.20 * decay + 0.15 * recency
-            + 0.15 * importance.min(1.0) + 0.20 * graph_proximity
+        GW_SIM * similarity + GW_DECAY * decay + GW_RECENCY * recency
+            + GW_IMPORTANCE * importance.min(1.0) + GW_GRAPH * graph_proximity
     } else {
-        0.40 * similarity + 0.25 * decay + 0.20 * recency + 0.15 * importance.min(1.0)
+        W_SIM * similarity + W_DECAY * decay + W_RECENCY * recency + W_IMPORTANCE * importance.min(1.0)
     };
     raw * valence_boost(valence)
+}
+
+/// Compute weighted contributions for graph-expanded scoring.
+pub fn graph_contributions(
+    similarity: f64,
+    decay: f64,
+    recency: f64,
+    importance: f64,
+    graph_proximity: f64,
+) -> ScoreContributions {
+    if graph_proximity > 0.0 {
+        ScoreContributions {
+            similarity: GW_SIM * similarity,
+            decay: GW_DECAY * decay,
+            recency: GW_RECENCY * recency,
+            importance: GW_IMPORTANCE * importance.min(1.0),
+            graph_proximity: GW_GRAPH * graph_proximity,
+        }
+    } else {
+        standard_contributions(similarity, decay, recency, importance)
+    }
 }
 
 /// Score for eviction prioritization (lower = more evictable).

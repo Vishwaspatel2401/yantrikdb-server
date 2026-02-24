@@ -8,6 +8,7 @@ use super::{now, embedding_hash, AIDB};
 
 impl AIDB {
     /// Get a single memory by RID.
+    #[tracing::instrument(skip(self))]
     pub fn get(&self, rid: &str) -> Result<Option<Memory>> {
         let mut stmt = self.conn.prepare(
             "SELECT * FROM memories WHERE rid = ?1",
@@ -43,6 +44,7 @@ impl AIDB {
     }
 
     /// Find memories that have decayed below a threshold.
+    #[tracing::instrument(skip(self))]
     pub fn decay(&self, threshold: f64) -> Result<Vec<DecayedMemory>> {
         let ts = now();
         let mut stmt = self.conn.prepare(
@@ -82,6 +84,7 @@ impl AIDB {
     }
 
     /// Tombstone a memory. Returns true if the memory was found and tombstoned.
+    #[tracing::instrument(skip(self))]
     pub fn forget(&self, rid: &str) -> Result<bool> {
         let ts = now();
         let changes = self.conn.execute(
@@ -112,6 +115,7 @@ impl AIDB {
     /// User-initiated memory correction.
     ///
     /// Creates a new corrected memory and tombstones the original.
+    #[tracing::instrument(skip(self, new_embedding))]
     pub fn correct(
         &self,
         rid: &str,
