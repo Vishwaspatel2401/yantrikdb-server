@@ -4,10 +4,6 @@ members = [
     "crates/yantrikdb-core",
     "crates/yantrikdb-python",
     "crates/yantrikdb-ml",
-    "crates/yantrikdb-companion",
-    "crates/yantrikdb-server",
-    "crates/yantrik",
-    "crates/yantrik-ui",
 ]
 
 # Optimize dependencies (candle, tokenizers) even in dev builds.
