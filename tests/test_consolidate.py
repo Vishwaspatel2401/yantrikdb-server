@@ -5,8 +5,8 @@ import time
 
 import pytest
 
-from aidb import AIDB
-from aidb.consolidate import (
+from yantrikdb import YantrikDB
+from yantrikdb.consolidate import (
     _cosine_similarity,
     _extractive_summary,
     _find_clusters,
@@ -27,7 +27,7 @@ def _vec(seed: float) -> list[float]:
 
 @pytest.fixture
 def db():
-    engine = AIDB(db_path=":memory:", embedding_dim=DIM)
+    engine = YantrikDB(db_path=":memory:", embedding_dim=DIM)
     yield engine
     engine.close()
 

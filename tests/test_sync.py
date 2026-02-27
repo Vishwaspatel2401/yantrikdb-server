@@ -2,7 +2,7 @@
 
 import json
 import pytest
-from aidb import AIDB
+from yantrikdb import YantrikDB
 
 
 class MockEmbedder:
@@ -20,13 +20,13 @@ def embedder():
 
 @pytest.fixture
 def db_a(embedder):
-    db = AIDB(":memory:", 8, embedder)
+    db = YantrikDB(":memory:", 8, embedder)
     return db
 
 
 @pytest.fixture
 def db_b(embedder):
-    db = AIDB(":memory:", 8, embedder)
+    db = YantrikDB(":memory:", 8, embedder)
     return db
 
 
@@ -120,7 +120,7 @@ class TestSyncProtocol:
     """Test the sync protocol message handling."""
 
     def test_hello_message(self, db_a):
-        from aidb.sync.transport import SyncProtocol
+        from yantrikdb.sync.transport import SyncProtocol
 
         proto = SyncProtocol(db_a)
         resp = json.loads(proto.handle_message(json.dumps({
@@ -130,7 +130,7 @@ class TestSyncProtocol:
         assert resp["result"]["actor_id"] == db_a.actor_id
 
     def test_pull_ops_empty(self, db_a):
-        from aidb.sync.transport import SyncProtocol
+        from yantrikdb.sync.transport import SyncProtocol
 
         proto = SyncProtocol(db_a)
         resp = json.loads(proto.handle_message(json.dumps({
@@ -141,7 +141,7 @@ class TestSyncProtocol:
         assert resp["result"]["ops"] == []
 
     def test_pull_ops_with_data(self, db_a):
-        from aidb.sync.transport import SyncProtocol
+        from yantrikdb.sync.transport import SyncProtocol
 
         db_a.record("sync test", embedding=[1.0] * 8)
         proto = SyncProtocol(db_a)
@@ -157,7 +157,7 @@ class TestSyncProtocol:
         assert isinstance(ops[0]["hlc"], str)
 
     def test_push_ops(self, db_a, db_b):
-        from aidb.sync.transport import SyncProtocol
+        from yantrikdb.sync.transport import SyncProtocol
 
         # Record in A, extract, serialize
         db_a.record("push test", embedding=[1.0] * 8)
@@ -180,7 +180,7 @@ class TestSyncProtocol:
         assert resp["result"]["ops_applied"] >= 1
 
     def test_ack_message(self, db_a):
-        from aidb.sync.transport import SyncProtocol
+        from yantrikdb.sync.transport import SyncProtocol
 
         proto = SyncProtocol(db_a)
         resp = json.loads(proto.handle_message(json.dumps({
@@ -200,7 +200,7 @@ class TestSyncProtocol:
         assert wm["op_id"] == "test-op-1"
 
     def test_unknown_method(self, db_a):
-        from aidb.sync.transport import SyncProtocol
+        from yantrikdb.sync.transport import SyncProtocol
 
         proto = SyncProtocol(db_a)
         resp = json.loads(proto.handle_message(json.dumps({
@@ -210,7 +210,7 @@ class TestSyncProtocol:
         assert "error" in resp
 
     def test_invalid_json(self, db_a):
-        from aidb.sync.transport import SyncProtocol
+        from yantrikdb.sync.transport import SyncProtocol
 
         proto = SyncProtocol(db_a)
         resp = json.loads(proto.handle_message("not json"))

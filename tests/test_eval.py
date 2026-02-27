@@ -1,12 +1,12 @@
-"""Tests for the evaluation harness — uses a mock embedder for speed."""
+"""Tests for the YantrikDB evaluation harness — uses a mock embedder for speed."""
 
 import math
 
 import pytest
 
-from aidb import AIDB
-from aidb.eval.harness import evaluate
-from aidb.eval.synthetic import GOLDEN_QUERIES, SESSIONS, load_sessions_into_db
+from yantrikdb import YantrikDB
+from yantrikdb.eval.harness import evaluate
+from yantrikdb.eval.synthetic import GOLDEN_QUERIES, SESSIONS, load_sessions_into_db
 
 
 DIM = 64
@@ -31,7 +31,7 @@ class MockEmbedder:
 @pytest.fixture
 def loaded_db():
     embedder = MockEmbedder()
-    db = AIDB(db_path=":memory:", embedding_dim=DIM, embedder=embedder)
+    db = YantrikDB(db_path=":memory:", embedding_dim=DIM, embedder=embedder)
     text_to_rid = load_sessions_into_db(db, embedder=embedder)
     yield db, text_to_rid, embedder
     db.close()

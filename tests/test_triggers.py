@@ -5,8 +5,8 @@ import time
 
 import pytest
 
-from aidb import AIDB
-from aidb.triggers import Trigger, check_all_triggers, check_decay_triggers, check_consolidation_triggers
+from yantrikdb import YantrikDB
+from yantrikdb.triggers import Trigger, check_all_triggers, check_decay_triggers, check_consolidation_triggers
 
 DIM = 8
 
@@ -19,7 +19,7 @@ def _vec(seed: float) -> list[float]:
 
 @pytest.fixture
 def db():
-    engine = AIDB(db_path=":memory:", embedding_dim=DIM)
+    engine = YantrikDB(db_path=":memory:", embedding_dim=DIM)
     yield engine
     engine.close()
 

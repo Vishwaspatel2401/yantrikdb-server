@@ -1,6 +1,6 @@
-"""Tests for AIDB MCP tool functions.
+"""Tests for YantrikDB MCP tool functions.
 
-Tests the tool logic directly with an in-memory AIDB, bypassing MCP transport.
+Tests the tool logic directly with an in-memory YantrikDB, bypassing MCP transport.
 """
 
 import json
@@ -9,7 +9,7 @@ import threading
 
 import pytest
 
-from aidb import AIDB
+from yantrikdb import YantrikDB
 
 DIM = 8
 
@@ -60,8 +60,8 @@ class MockContext:
 
 @pytest.fixture
 def db():
-    """In-memory AIDB with mock embedder for tool tests."""
-    engine = AIDB(db_path=":memory:", embedding_dim=DIM)
+    """In-memory YantrikDB with mock embedder for tool tests."""
+    engine = YantrikDB(db_path=":memory:", embedding_dim=DIM)
     engine.set_embedder(_MockEmbedder())
     yield engine
     engine.close()
@@ -69,7 +69,7 @@ def db():
 
 @pytest.fixture
 def ctx(db):
-    """Mock MCP context backed by the in-memory AIDB."""
+    """Mock MCP context backed by the in-memory YantrikDB."""
     return MockContext(db)
 
 
@@ -78,7 +78,7 @@ def ctx(db):
 
 class TestMemoryRecord:
     def test_record_returns_rid(self, db, ctx):
-        from aidb.mcp.tools import memory_record
+        from yantrikdb.mcp.tools import memory_record
 
         result = json.loads(memory_record(text="hello world", ctx=ctx))
         assert "rid" in result
@@ -86,7 +86,7 @@ class TestMemoryRecord:
         assert len(result["rid"]) == 36
 
     def test_record_with_all_fields(self, db, ctx):
-        from aidb.mcp.tools import memory_record
+        from yantrikdb.mcp.tools import memory_record
 
         result = json.loads(memory_record(
             text="important fact",
@@ -109,7 +109,7 @@ class TestMemoryRecord:
 
 class TestMemoryRecall:
     def test_recall_returns_results(self, db, ctx):
-        from aidb.mcp.tools import memory_recall, memory_record
+        from yantrikdb.mcp.tools import memory_recall, memory_record
 
         # Record some memories with pre-computed embeddings
         db.record("cats are fluffy", embedding=_vec(1.0))
@@ -124,13 +124,13 @@ class TestMemoryRecall:
         assert "why_retrieved" in result["results"][0]
 
     def test_recall_empty_db(self, db, ctx):
-        from aidb.mcp.tools import memory_recall
+        from yantrikdb.mcp.tools import memory_recall
 
         result = json.loads(memory_recall(query="anything", ctx=ctx))
         assert result["count"] == 0
 
     def test_recall_with_type_filter(self, db, ctx):
-        from aidb.mcp.tools import memory_recall
+        from yantrikdb.mcp.tools import memory_recall
 
         db.record("event happened", memory_type="episodic", embedding=_vec(1.0))
         db.record("fact about world", memory_type="semantic", embedding=_vec(2.0))
@@ -149,7 +149,7 @@ class TestMemoryRecall:
 
 class TestMemoryGet:
     def test_get_existing(self, db, ctx):
-        from aidb.mcp.tools import memory_get
+        from yantrikdb.mcp.tools import memory_get
 
         rid = db.record("test", embedding=_vec(1.0))
         result = json.loads(memory_get(rid=rid, ctx=ctx))
@@ -157,7 +157,7 @@ class TestMemoryGet:
         assert result["text"] == "test"
 
     def test_get_nonexistent(self, db, ctx):
-        from aidb.mcp.tools import memory_get
+        from yantrikdb.mcp.tools import memory_get
 
         result = json.loads(memory_get(rid="nonexistent", ctx=ctx))
         assert "error" in result
@@ -168,7 +168,7 @@ class TestMemoryGet:
 
 class TestMemoryForget:
     def test_forget_existing(self, db, ctx):
-        from aidb.mcp.tools import memory_forget
+        from yantrikdb.mcp.tools import memory_forget
 
         rid = db.record("to forget", embedding=_vec(1.0))
         result = json.loads(memory_forget(rid=rid, ctx=ctx))
@@ -179,7 +179,7 @@ class TestMemoryForget:
         assert mem["consolidation_status"] == "tombstoned"
 
     def test_forget_nonexistent(self, db, ctx):
-        from aidb.mcp.tools import memory_forget
+        from yantrikdb.mcp.tools import memory_forget
 
         result = json.loads(memory_forget(rid="nonexistent", ctx=ctx))
         assert result["forgotten"] is False
@@ -190,7 +190,7 @@ class TestMemoryForget:
 
 class TestMemoryCorrect:
     def test_correct_creates_new_memory(self, db, ctx):
-        from aidb.mcp.tools import memory_correct
+        from yantrikdb.mcp.tools import memory_correct
 
         rid = db.record("wrong fact", embedding=_vec(1.0))
         result = json.loads(memory_correct(
@@ -217,7 +217,7 @@ class TestMemoryCorrect:
 
 class TestEntityRelate:
     def test_relate_returns_edge_id(self, db, ctx):
-        from aidb.mcp.tools import entity_relate
+        from yantrikdb.mcp.tools import entity_relate
 
         result = json.loads(entity_relate(
             source="Alice",
@@ -235,7 +235,7 @@ class TestEntityRelate:
 
 class TestEntityEdges:
     def test_get_edges(self, db, ctx):
-        from aidb.mcp.tools import entity_edges, entity_relate
+        from yantrikdb.mcp.tools import entity_edges, entity_relate
 
         entity_relate(source="Alice", target="Bob", relationship="knows", ctx=ctx)
         entity_relate(source="Alice", target="Carol", relationship="works_with", ctx=ctx)
@@ -245,7 +245,7 @@ class TestEntityEdges:
         assert len(result["edges"]) == 2
 
     def test_get_edges_empty(self, db, ctx):
-        from aidb.mcp.tools import entity_edges
+        from yantrikdb.mcp.tools import entity_edges
 
         result = json.loads(entity_edges(entity="Nobody", ctx=ctx))
         assert result["count"] == 0
@@ -256,7 +256,7 @@ class TestEntityEdges:
 
 class TestMemoryThink:
     def test_think_runs_without_error(self, db, ctx):
-        from aidb.mcp.tools import memory_think
+        from yantrikdb.mcp.tools import memory_think
 
         result = json.loads(memory_think(ctx=ctx))
         assert "triggers" in result
@@ -269,7 +269,7 @@ class TestMemoryThink:
 
 class TestConflictList:
     def test_conflict_list_empty(self, db, ctx):
-        from aidb.mcp.tools import conflict_list
+        from yantrikdb.mcp.tools import conflict_list
 
         result = json.loads(conflict_list(ctx=ctx))
         assert result["count"] == 0
@@ -280,7 +280,7 @@ class TestConflictList:
 
 class TestTriggerList:
     def test_trigger_list_empty(self, db, ctx):
-        from aidb.mcp.tools import trigger_list
+        from yantrikdb.mcp.tools import trigger_list
 
         result = json.loads(trigger_list(ctx=ctx))
         assert result["count"] == 0
@@ -291,7 +291,7 @@ class TestTriggerList:
 
 class TestMemoryStats:
     def test_stats_returns_expected_fields(self, db, ctx):
-        from aidb.mcp.tools import memory_stats
+        from yantrikdb.mcp.tools import memory_stats
 
         db.record("test", embedding=_vec(1.0))
         result = json.loads(memory_stats(ctx=ctx))

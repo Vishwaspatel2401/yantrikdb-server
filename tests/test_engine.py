@@ -1,11 +1,11 @@
-"""Tests for the AIDB engine — record, recall, relate, decay, forget."""
+"""Tests for the YantrikDB engine — record, recall, relate, decay, forget."""
 
 import math
 import time
 
 import pytest
 
-from aidb import AIDB
+from yantrikdb import YantrikDB
 
 
 # ── Helpers ──────────────────────────────────────────────
@@ -29,8 +29,8 @@ def _vec(seed: float) -> list[float]:
 
 @pytest.fixture
 def db():
-    """In-memory AIDB with no embedder (pre-computed vectors only)."""
-    engine = AIDB(db_path=":memory:", embedding_dim=DIM)
+    """In-memory YantrikDB with no embedder (pre-computed vectors only)."""
+    engine = YantrikDB(db_path=":memory:", embedding_dim=DIM)
     yield engine
     engine.close()
 
@@ -594,7 +594,7 @@ class TestQueryBuilder:
 
     @pytest.fixture
     def db(self, tmp_path):
-        return AIDB(str(tmp_path / "query_test.db"), embedding_dim=DIM)
+        return YantrikDB(str(tmp_path / "query_test.db"), embedding_dim=DIM)
 
     def test_query_basic(self, db):
         for i in range(10):
@@ -642,7 +642,7 @@ class TestEncryption:
 
     def test_encrypted_record_and_get(self, tmp_path):
         key = bytes(range(32))
-        db = AIDB(str(tmp_path / "enc.db"), embedding_dim=DIM, encryption_key=key)
+        db = YantrikDB(str(tmp_path / "enc.db"), embedding_dim=DIM, encryption_key=key)
         assert db.is_encrypted
         rid = db.record("secret memory", embedding=_vec(1.0), importance=0.8)
         mem = db.get(rid)
@@ -652,7 +652,7 @@ class TestEncryption:
 
     def test_encrypted_data_not_plaintext(self, tmp_path):
         key = bytes(range(32))
-        db = AIDB(str(tmp_path / "enc2.db"), embedding_dim=DIM, encryption_key=key)
+        db = YantrikDB(str(tmp_path / "enc2.db"), embedding_dim=DIM, encryption_key=key)
         rid = db.record("top secret", embedding=_vec(1.0))
 
         # Read raw from DB — text should be encrypted (not plaintext)
@@ -664,7 +664,7 @@ class TestEncryption:
 
     def test_encrypted_recall(self, tmp_path):
         key = bytes(range(32))
-        db = AIDB(str(tmp_path / "enc3.db"), embedding_dim=DIM, encryption_key=key)
+        db = YantrikDB(str(tmp_path / "enc3.db"), embedding_dim=DIM, encryption_key=key)
         db.record("cat on mat", embedding=_vec(1.0))
         db.record("dog in park", embedding=_vec(5.0))
         results = db.recall(query_embedding=_vec(1.0), top_k=1, skip_reinforce=True)
@@ -675,12 +675,12 @@ class TestEncryption:
     def test_encrypted_reopen_same_key(self, tmp_path):
         key = bytes(range(32))
         path = str(tmp_path / "enc4.db")
-        db = AIDB(path, embedding_dim=DIM, encryption_key=key)
+        db = YantrikDB(path, embedding_dim=DIM, encryption_key=key)
         rid = db.record("persistent", embedding=_vec(1.0))
         db.close()
 
         # Reopen with same key
-        db2 = AIDB(path, embedding_dim=DIM, encryption_key=key)
+        db2 = YantrikDB(path, embedding_dim=DIM, encryption_key=key)
         mem = db2.get(rid)
         assert mem["text"] == "persistent"
         db2.close()
@@ -688,30 +688,30 @@ class TestEncryption:
     def test_encrypted_wrong_key_fails(self, tmp_path):
         key_a = bytes(range(32))
         path = str(tmp_path / "enc5.db")
-        db = AIDB(path, embedding_dim=DIM, encryption_key=key_a)
+        db = YantrikDB(path, embedding_dim=DIM, encryption_key=key_a)
         db.record("data", embedding=_vec(1.0))
         db.close()
 
         key_b = bytes([99] + list(range(1, 32)))
         with pytest.raises(RuntimeError):
-            AIDB(path, embedding_dim=DIM, encryption_key=key_b)
+            YantrikDB(path, embedding_dim=DIM, encryption_key=key_b)
 
     def test_open_encrypted_without_key_fails(self, tmp_path):
         key = bytes(range(32))
         path = str(tmp_path / "enc6.db")
-        db = AIDB(path, embedding_dim=DIM, encryption_key=key)
+        db = YantrikDB(path, embedding_dim=DIM, encryption_key=key)
         db.record("data", embedding=_vec(1.0))
         db.close()
 
         with pytest.raises(RuntimeError):
-            AIDB(path, embedding_dim=DIM)
+            YantrikDB(path, embedding_dim=DIM)
 
     def test_invalid_key_length_rejected(self):
         with pytest.raises((ValueError, RuntimeError)):
-            AIDB(":memory:", embedding_dim=DIM, encryption_key=b"short")
+            YantrikDB(":memory:", embedding_dim=DIM, encryption_key=b"short")
 
     def test_unencrypted_unchanged(self, tmp_path):
-        db = AIDB(str(tmp_path / "plain.db"), embedding_dim=DIM)
+        db = YantrikDB(str(tmp_path / "plain.db"), embedding_dim=DIM)
         assert not db.is_encrypted
         rid = db.record("plaintext", embedding=_vec(1.0))
         row = db._conn.execute(
@@ -728,7 +728,7 @@ class TestTenantIsolation:
     """Tests for multi-tenant manager."""
 
     def test_tenant_isolation(self, tmp_path):
-        from aidb import TenantManager
+        from yantrikdb import TenantManager
 
         mgr = TenantManager(str(tmp_path / "tenants"), embedding_dim=DIM)
         db_a = mgr.get("tenant-a")
@@ -742,7 +742,7 @@ class TestTenantIsolation:
         db_b.close()
 
     def test_tenant_with_encryption(self, tmp_path):
-        from aidb import TenantManager
+        from yantrikdb import TenantManager
 
         mgr = TenantManager(str(tmp_path / "tenants"), embedding_dim=DIM)
         mgr.register_tenant("secure", encryption_key=bytes(range(32)))
@@ -755,7 +755,7 @@ class TestTenantIsolation:
         db.close()
 
     def test_discovered_tenants(self, tmp_path):
-        from aidb import TenantManager
+        from yantrikdb import TenantManager
 
         mgr = TenantManager(str(tmp_path / "tenants"), embedding_dim=DIM)
         mgr.get("alpha").close()
@@ -766,7 +766,7 @@ class TestTenantIsolation:
         assert "beta" in discovered
 
     def test_cross_tenant_data_isolation(self, tmp_path):
-        from aidb import TenantManager
+        from yantrikdb import TenantManager
 
         mgr = TenantManager(str(tmp_path / "tenants"), embedding_dim=DIM)
 
@@ -782,7 +782,7 @@ class TestTenantIsolation:
         db_b.close()
 
     def test_tenant_different_encryption_keys(self, tmp_path):
-        from aidb import TenantManager
+        from yantrikdb import TenantManager
 
         mgr = TenantManager(str(tmp_path / "tenants"), embedding_dim=DIM)
 

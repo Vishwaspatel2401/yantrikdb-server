@@ -1,4 +1,4 @@
-"""Tests for the AIDB CLI tool."""
+"""Tests for the YantrikDB CLI tool."""
 
 import json
 import math
@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from aidb import AIDB
-from aidb.cli import cli
+from yantrikdb import YantrikDB
+from yantrikdb.cli import cli
 
 DIM = 8
 
@@ -24,7 +24,7 @@ def _vec(seed: float) -> list[float]:
 def db_path(tmp_path):
     """Create a temp DB with some test data."""
     p = str(tmp_path / "test.db")
-    db = AIDB(db_path=p, embedding_dim=DIM)
+    db = YantrikDB(db_path=p, embedding_dim=DIM)
     db.record("hello world", embedding=_vec(1.0))
     db.record("important fact", memory_type="semantic", importance=0.9,
               embedding=_vec(2.0))
@@ -52,7 +52,7 @@ class TestStats:
 
 class TestInspect:
     def test_inspect_existing(self, runner, db_path):
-        db = AIDB(db_path=db_path, embedding_dim=DIM)
+        db = YantrikDB(db_path=db_path, embedding_dim=DIM)
         results = db.recall(query_embedding=_vec(1.0), top_k=1, skip_reinforce=True)
         rid = results[0]["rid"]
         db.close()
@@ -74,7 +74,7 @@ class TestExportImport:
         result = runner.invoke(cli, ["export", "--db", db_path, "--dim", str(DIM)])
         assert result.exit_code == 0
         data = json.loads(result.output)
-        assert data["version"] == "aidb-export-v1"
+        assert data["version"] == "yantrikdb-export-v1"
         assert len(data["memories"]) == 2
         assert len(data["edges"]) == 1
 
@@ -84,7 +84,7 @@ class TestExportImport:
                                      "-o", out])
         assert result.exit_code == 0
         data = json.loads(Path(out).read_text())
-        assert data["version"] == "aidb-export-v1"
+        assert data["version"] == "yantrikdb-export-v1"
         assert len(data["memories"]) == 2
 
     def test_export_no_embeddings(self, runner, db_path):

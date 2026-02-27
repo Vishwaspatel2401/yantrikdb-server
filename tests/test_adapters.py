@@ -1,7 +1,7 @@
 """Tests for agent framework adapters (LangChain, OpenAI, CrewAI)."""
 
 import pytest
-from aidb import AIDB
+from yantrikdb import YantrikDB
 
 
 class MockEmbedder:
@@ -13,16 +13,16 @@ class MockEmbedder:
 
 @pytest.fixture
 def db():
-    return AIDB(":memory:", 8, MockEmbedder())
+    return YantrikDB(":memory:", 8, MockEmbedder())
 
 
 class TestLangChainAdapter:
     """Test LangChain chat memory adapter."""
 
     def test_save_and_load(self, db):
-        from aidb.adapters.langchain import AidbChatMemory
+        from yantrikdb.adapters.langchain import YantrikDBChatMemory
 
-        mem = AidbChatMemory(db)
+        mem = YantrikDBChatMemory(db)
         mem.save_context(
             {"input": "What is Python?"},
             {"output": "Python is a programming language."},
@@ -34,22 +34,22 @@ class TestLangChainAdapter:
         assert "Python" in history
 
     def test_memory_variables_property(self, db):
-        from aidb.adapters.langchain import AidbChatMemory
+        from yantrikdb.adapters.langchain import YantrikDBChatMemory
 
-        mem = AidbChatMemory(db, memory_key="chat_history")
+        mem = YantrikDBChatMemory(db, memory_key="chat_history")
         assert mem.memory_variables == ["chat_history"]
 
     def test_empty_input_returns_empty(self, db):
-        from aidb.adapters.langchain import AidbChatMemory
+        from yantrikdb.adapters.langchain import YantrikDBChatMemory
 
-        mem = AidbChatMemory(db)
+        mem = YantrikDBChatMemory(db)
         result = mem.load_memory_variables({"input": ""})
         assert result[mem.memory_key] == ""
 
     def test_clear_is_noop(self, db):
-        from aidb.adapters.langchain import AidbChatMemory
+        from yantrikdb.adapters.langchain import YantrikDBChatMemory
 
-        mem = AidbChatMemory(db)
+        mem = YantrikDBChatMemory(db)
         mem.save_context({"input": "hi"}, {"output": "hello"})
         mem.clear()  # Should not raise
         # Memories should still be recallable after clear
@@ -57,9 +57,9 @@ class TestLangChainAdapter:
         assert result[mem.memory_key] != ""
 
     def test_multiple_turns(self, db):
-        from aidb.adapters.langchain import AidbChatMemory
+        from yantrikdb.adapters.langchain import YantrikDBChatMemory
 
-        mem = AidbChatMemory(db, top_k=10)
+        mem = YantrikDBChatMemory(db, top_k=10)
         for i in range(5):
             mem.save_context(
                 {"input": f"Turn {i} question about cats"},
@@ -75,7 +75,7 @@ class TestOpenAIAgentsAdapter:
     """Test OpenAI Agents SDK adapter."""
 
     def test_get_tools_structure(self):
-        from aidb.adapters.openai_agents import get_tools
+        from yantrikdb.adapters.openai_agents import get_tools
 
         tools = get_tools()
         assert isinstance(tools, list)
@@ -97,7 +97,7 @@ class TestOpenAIAgentsAdapter:
             assert "parameters" in tool["function"]
 
     def test_handle_record_and_recall(self, db):
-        from aidb.adapters.openai_agents import handle_tool_call
+        from yantrikdb.adapters.openai_agents import handle_tool_call
 
         result = handle_tool_call(db, "memory_record", {
             "text": "The sky is blue",
@@ -114,7 +114,7 @@ class TestOpenAIAgentsAdapter:
         assert len(result["memories"]) >= 1
 
     def test_handle_forget(self, db):
-        from aidb.adapters.openai_agents import handle_tool_call
+        from yantrikdb.adapters.openai_agents import handle_tool_call
 
         result = handle_tool_call(db, "memory_record", {"text": "secret info"})
         rid = result["rid"]
@@ -123,7 +123,7 @@ class TestOpenAIAgentsAdapter:
         assert result["forgotten"] is True
 
     def test_handle_entity_relate_and_edges(self, db):
-        from aidb.adapters.openai_agents import handle_tool_call
+        from yantrikdb.adapters.openai_agents import handle_tool_call
 
         handle_tool_call(db, "entity_relate", {
             "source": "Alice",
@@ -136,13 +136,13 @@ class TestOpenAIAgentsAdapter:
         assert any(e["dst"] == "Bob" for e in result["edges"])
 
     def test_handle_stats(self, db):
-        from aidb.adapters.openai_agents import handle_tool_call
+        from yantrikdb.adapters.openai_agents import handle_tool_call
 
         result = handle_tool_call(db, "memory_stats", {})
         assert "active_memories" in result
 
     def test_unknown_tool_raises(self, db):
-        from aidb.adapters.openai_agents import handle_tool_call
+        from yantrikdb.adapters.openai_agents import handle_tool_call
 
         with pytest.raises(ValueError, match="Unknown tool"):
             handle_tool_call(db, "nonexistent_tool", {})
@@ -152,9 +152,9 @@ class TestCrewAIAdapter:
     """Test CrewAI memory adapters."""
 
     def test_short_term_save_and_search(self, db):
-        from aidb.adapters.crewai import AidbShortTermMemory
+        from yantrikdb.adapters.crewai import YantrikDBShortTermMemory
 
-        mem = AidbShortTermMemory(db)
+        mem = YantrikDBShortTermMemory(db)
         mem.save("The meeting is at 3pm", agent="scheduler")
         results = mem.search("When is the meeting?")
         assert len(results) >= 1
@@ -163,18 +163,18 @@ class TestCrewAIAdapter:
         assert "3pm" in results[0]["context"]
 
     def test_long_term_save_and_search(self, db):
-        from aidb.adapters.crewai import AidbLongTermMemory
+        from yantrikdb.adapters.crewai import YantrikDBLongTermMemory
 
-        mem = AidbLongTermMemory(db)
+        mem = YantrikDBLongTermMemory(db)
         mem.save("Python was created by Guido van Rossum")
         results = mem.search("Who created Python?")
         assert len(results) >= 1
         assert "Guido" in results[0]["context"]
 
     def test_entity_save_with_graph(self, db):
-        from aidb.adapters.crewai import AidbEntityMemory
+        from yantrikdb.adapters.crewai import YantrikDBEntityMemory
 
-        mem = AidbEntityMemory(db)
+        mem = YantrikDBEntityMemory(db)
         mem.save(
             "Alice is the CTO of TechCorp",
             metadata={
@@ -189,9 +189,9 @@ class TestCrewAIAdapter:
         assert any(e["dst"] == "TechCorp" for e in edges)
 
     def test_entity_search_with_expansion(self, db):
-        from aidb.adapters.crewai import AidbEntityMemory
+        from yantrikdb.adapters.crewai import YantrikDBEntityMemory
 
-        mem = AidbEntityMemory(db)
+        mem = YantrikDBEntityMemory(db)
         mem.save(
             "Alice leads the engineering team",
             metadata={"entity": "Alice"},
@@ -201,16 +201,16 @@ class TestCrewAIAdapter:
         assert len(results) >= 1
 
     def test_reset_is_noop(self, db):
-        from aidb.adapters.crewai import AidbShortTermMemory, AidbLongTermMemory, AidbEntityMemory
+        from yantrikdb.adapters.crewai import YantrikDBShortTermMemory, YantrikDBLongTermMemory, YantrikDBEntityMemory
 
-        for cls in [AidbShortTermMemory, AidbLongTermMemory, AidbEntityMemory]:
+        for cls in [YantrikDBShortTermMemory, YantrikDBLongTermMemory, YantrikDBEntityMemory]:
             mem = cls(db)
             mem.reset()  # Should not raise
 
     def test_search_limit(self, db):
-        from aidb.adapters.crewai import AidbShortTermMemory
+        from yantrikdb.adapters.crewai import YantrikDBShortTermMemory
 
-        mem = AidbShortTermMemory(db, top_k=3)
+        mem = YantrikDBShortTermMemory(db, top_k=3)
         for i in range(10):
             mem.save(f"Event number {i} happened today")
 

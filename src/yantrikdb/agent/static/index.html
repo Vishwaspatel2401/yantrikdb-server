@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0a0a0a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Yantrik</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+  <!-- Boot Sequence: "The Returning Glow" -->
+  <div id="boot" class="screen screen--active">
+    <div class="boot">
+      <div class="boot-embers">
+        <div class="ember" style="--x: 22%; --y: 30%; --delay: 0s; --rate: 2.3s"></div>
+        <div class="ember" style="--x: 71%; --y: 18%; --delay: 0.4s; --rate: 2.7s"></div>
+        <div class="ember" style="--x: 35%; --y: 72%; --delay: 0.8s; --rate: 2.1s"></div>
+        <div class="ember" style="--x: 65%; --y: 58%; --delay: 0.2s; --rate: 2.9s"></div>
+        <div class="ember" style="--x: 48%; --y: 25%; --delay: 0.6s; --rate: 2.5s"></div>
+        <div class="ember" style="--x: 80%; --y: 65%; --delay: 1.0s; --rate: 2.4s"></div>
+      </div>
+      <div class="boot-center">
+        <div class="boot-orb">
+          <div class="orb__glow"></div>
+          <div class="orb__core"></div>
+        </div>
+        <div class="boot-text">Yantrik</div>
+        <div class="boot-status" id="boot-status">remembering...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- AI Mode: Idle — breathing orb -->
+  <div id="ai-idle" class="screen">
+    <div class="orb-container">
+      <div class="orb" id="orb">
+        <div class="orb__glow"></div>
+        <div class="orb__core"></div>
+        <div class="orb__ring"></div>
+      </div>
+      <div class="orb-label">Yantrik</div>
+    </div>
+    <button class="mode-switch mode-switch--bottom-right" id="btn-to-generic" aria-label="Switch to home">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="3" width="7" height="7" rx="1"/>
+        <rect x="14" y="3" width="7" height="7" rx="1"/>
+        <rect x="3" y="14" width="7" height="7" rx="1"/>
+        <rect x="14" y="14" width="7" height="7" rx="1"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- AI Mode: Chat -->
+  <div id="ai-chat" class="screen">
+    <header class="chat-header">
+      <button class="header-btn" id="btn-back" aria-label="Back to idle">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M19 12H5M12 19l-7-7 7-7"/>
+        </svg>
+      </button>
+      <span class="header-title">Yantrik</span>
+      <button class="header-btn" id="btn-to-generic-chat" aria-label="Switch to home">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="7" height="7" rx="1"/>
+          <rect x="14" y="3" width="7" height="7" rx="1"/>
+          <rect x="3" y="14" width="7" height="7" rx="1"/>
+          <rect x="14" y="14" width="7" height="7" rx="1"/>
+        </svg>
+      </button>
+    </header>
+    <div id="messages" class="messages"></div>
+    <div class="typing-indicator" id="typing-indicator">
+      <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+    </div>
+    <div class="input-area">
+      <button class="mic-btn" id="btn-mic" aria-label="Voice input">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+          <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+        </svg>
+      </button>
+      <textarea id="chat-input" placeholder="Message Yantrik..." rows="1"></textarea>
+      <button class="send-btn" id="btn-send" aria-label="Send">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Generic Mode: Home -->
+  <div id="generic-home" class="screen">
+    <header class="home-header">
+      <span class="logo">Yantrik</span>
+      <div class="status-pill" id="status-pill">
+        <span class="status-dot"></span>
+        <span id="memory-count">0</span> memories
+      </div>
+      <button class="header-btn" id="btn-to-ai" aria-label="Switch to AI mode">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="5"/>
+          <circle cx="12" cy="12" r="9" stroke-dasharray="4 4"/>
+        </svg>
+      </button>
+    </header>
+    <div id="glance-cards" class="glance-cards"></div>
+    <div class="input-area">
+      <button class="mic-btn" id="btn-home-mic" aria-label="Voice input">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+          <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+        </svg>
+      </button>
+      <textarea id="home-input" placeholder="Message Yantrik..." rows="1"></textarea>
+      <button class="send-btn" id="btn-home-send" aria-label="Send">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <script src="/static/js/app.js"></script>
+  <script src="/static/js/chat.js"></script>
+  <script src="/static/js/glance.js"></script>
+  <script src="/static/js/voice.js"></script>
+</body>
+</html>

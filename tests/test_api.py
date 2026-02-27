@@ -1,4 +1,4 @@
-"""Tests for the AIDB REST API."""
+"""Tests for the YantrikDB REST API."""
 
 import math
 import threading
@@ -6,7 +6,7 @@ import threading
 import pytest
 from fastapi.testclient import TestClient
 
-from aidb import AIDB
+from yantrikdb import YantrikDB
 
 DIM = 8
 
@@ -25,17 +25,17 @@ class _MockEmbedder:
 
 @pytest.fixture
 def client():
-    """Create a test client with in-memory AIDB, bypassing lifespan."""
+    """Create a test client with in-memory YantrikDB, bypassing lifespan."""
     from contextlib import asynccontextmanager
 
     from fastapi import FastAPI as _FastAPI
 
-    import aidb.api as api_mod
+    import yantrikdb.api as api_mod
 
     # Create a test lifespan that creates the DB on the event loop thread
     @asynccontextmanager
     async def test_lifespan(app):
-        db = AIDB(db_path=":memory:", embedding_dim=DIM)
+        db = YantrikDB(db_path=":memory:", embedding_dim=DIM)
         db.set_embedder(_MockEmbedder())
         lock = threading.Lock()
         app.state.db = db
@@ -48,7 +48,7 @@ def client():
             api_mod._db = original
             db.close()
 
-    test_app = _FastAPI(title="AIDB", version="0.1.0", lifespan=test_lifespan)
+    test_app = _FastAPI(title="YantrikDB", version="0.1.0", lifespan=test_lifespan)
     for route in api_mod.app.routes:
         test_app.routes.append(route)
 
@@ -175,14 +175,14 @@ class TestSystemEndpoints:
         resp = client.get("/export")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["version"] == "aidb-export-v1"
+        assert data["version"] == "yantrikdb-export-v1"
         assert len(data["memories"]) == 1
 
     def test_openapi_schema(self, client):
         resp = client.get("/openapi.json")
         assert resp.status_code == 200
         schema = resp.json()
-        assert schema["info"]["title"] == "AIDB"
+        assert schema["info"]["title"] == "YantrikDB"
         assert "/memories" in schema["paths"]
         assert "/memories/recall" in schema["paths"]
         assert "/stats" in schema["paths"]

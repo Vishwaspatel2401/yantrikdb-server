@@ -1,4 +1,4 @@
-# AIDB — A Cognitive Memory Engine for Persistent AI Systems
+# YantrikDB — A Cognitive Memory Engine for Persistent AI Systems
 
 > The memory engine for AI that actually knows you.
 
@@ -49,7 +49,7 @@ Five index types in one engine, sharing the same memory pages, WAL, and query pl
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                    AIDB Engine                       │
+│                  YantrikDB Engine                         │
 │                                                     │
 │  ┌───────────┬───────────┬───────────┬───────────┐ │
 │  │  Vector   │  Graph    │ Temporal  │   Decay   │ │
@@ -91,19 +91,19 @@ Inspired by cognitive science (Tulving's taxonomy):
 ### Core Operations
 
 ```
-aidb.record(memory, importance=0.8, emotion="frustrated")
-aidb.recall("What does the user feel about their job?")
-aidb.relate("user.job", "user.stress", strength=0.7)
-aidb.consolidate(topic="user.career", since="30d")
-aidb.decay(threshold=0.1)       // prune low-importance memories
-aidb.forget(memory_id)          // explicit removal
-aidb.conflict(memory_a, memory_b)  // flag contradiction
-aidb.resolve(conflict_id, resolution)  // user-driven resolution
+yantrikdb.record(memory, importance=0.8, emotion="frustrated")
+yantrikdb.recall("What does the user feel about their job?")
+yantrikdb.relate("user.job", "user.stress", strength=0.7)
+yantrikdb.consolidate(topic="user.career", since="30d")
+yantrikdb.decay(threshold=0.1)       // prune low-importance memories
+yantrikdb.forget(memory_id)          // explicit removal
+yantrikdb.conflict(memory_a, memory_b)  // flag contradiction
+yantrikdb.resolve(conflict_id, resolution)  // user-driven resolution
 ```
 
 ## Conflict Resolution — Human-in-the-Loop
 
-When synced devices produce contradictory memories, AIDB doesn't guess. It creates a **conflict segment** — a first-class data structure:
+When synced devices produce contradictory memories, YantrikDB doesn't guess. It creates a **conflict segment** — a first-class data structure:
 
 ```
 ┌──────────────────────────────────────────┐
@@ -136,14 +136,14 @@ Conflicts are triaged by priority:
 
 ## Multi-Device Sync Protocol
 
-AIDB is **local-first** with CRDT-based replication:
+YantrikDB is **local-first** with CRDT-based replication:
 
 ```
 ┌──────────────────────┐       ┌──────────────────────┐
 │   Device A (Phone)   │       │  Device B (Laptop)   │
 │                      │       │                      │
 │  ┌────────────────┐  │ sync  │  ┌────────────────┐  │
-│  │  AIDB Engine   │◄─┼───────┼─►│  AIDB Engine   │  │
+│  │ YantrikDB Engine │◄─┼───────┼─►│ YantrikDB Engine │  │
 │  └────────────────┘  │       │  └────────────────┘  │
 │  ┌────────────────┐  │       │  ┌────────────────┐  │
 │  │ Replication    │  │       │  │ Replication    │  │
@@ -173,7 +173,7 @@ AIDB is **local-first** with CRDT-based replication:
 
 ## Proactive Cognition Loop
 
-AIDB runs a **background processing loop** even between conversations — giving AI genuine reasons to reach out:
+YantrikDB runs a **background processing loop** even between conversations — giving AI genuine reasons to reach out:
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -248,7 +248,7 @@ Built-in safety constraints:
 
 ## Research & Publications
 
-- **Whitepaper (upcoming):** "AIDB: A Cognitive Memory Engine for Persistent AI Systems" — to be published on Zenodo and ArXiv
+- **Whitepaper (upcoming):** "YantrikDB: A Cognitive Memory Engine for Persistent AI Systems" — to be published on Zenodo and ArXiv
 - **Related work by the author:** ["Convert Once, Consume Many: SDF for Cacheable, Typed Semantic Extraction from Web Pages"](https://zenodo.org/records/18559223) — solving efficient data ingestion for AI agents (the upstream problem to memory)
 
 ## Author
