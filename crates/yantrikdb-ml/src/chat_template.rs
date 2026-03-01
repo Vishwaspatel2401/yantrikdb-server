@@ -30,18 +30,28 @@ pub fn format_chat(messages: &[ChatMessage]) -> String {
 /// Format tool definitions for inclusion in the system prompt.
 ///
 /// Qwen2.5 expects tool schemas in the system prompt. This formats them
-/// as a standard tool definition block.
+/// as a standard tool definition block. Uses the first real tool name in
+/// the example to prevent small models from copying a placeholder literally.
 pub fn format_tools(tools: &[serde_json::Value]) -> String {
     if tools.is_empty() {
         return String::new();
     }
+
+    // Use first real tool name so small models don't copy a placeholder literally
+    let example_name = tools.first()
+        .and_then(|t| t.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str()))
+        .or_else(|| tools.first().and_then(|t| t.get("name")).and_then(|n| n.as_str()))
+        .unwrap_or("memory_recall");
 
     let mut s = String::from("\n\n# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n");
     for tool in tools {
         s.push_str(&serde_json::to_string(tool).unwrap_or_default());
         s.push('\n');
     }
-    s.push_str("</tools>\n\nFor each function call, return a JSON object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{\"name\": \"function_name\", \"arguments\": {\"arg1\": \"value1\"}}\n</tool_call>");
+    s.push_str(&format!(
+        "</tools>\n\nTo call a tool, output a JSON object inside <tool_call></tool_call> XML tags. The \"name\" field MUST be one of the tool names listed above. Example:\n<tool_call>\n{{\"name\": \"{}\", \"arguments\": {{}}}}\n</tool_call>",
+        example_name
+    ));
     s
 }
 
