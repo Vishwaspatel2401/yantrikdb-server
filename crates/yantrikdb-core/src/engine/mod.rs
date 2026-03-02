@@ -395,4 +395,32 @@ impl YantrikDB {
             None,  // source
         )
     }
+
+    /// Recall memories with domain and source filters.
+    ///
+    /// Like `recall_text` but restricts results to a specific domain
+    /// (e.g. `"session/summary"`, `"audit/tools"`) and/or source
+    /// (e.g. `"self"`, `"companion"`, `"system"`).
+    pub fn recall_text_filtered(
+        &self,
+        query: &str,
+        top_k: usize,
+        domain: Option<&str>,
+        source: Option<&str>,
+    ) -> Result<Vec<RecallResult>> {
+        let embedding = self.embed(query)?;
+        self.recall(
+            &embedding,
+            top_k,
+            None,  // time_window
+            None,  // memory_type
+            false, // include_consolidated
+            true,  // expand_entities
+            Some(query),
+            false, // skip_reinforce
+            None,  // namespace
+            domain,
+            source,
+        )
+    }
 }
