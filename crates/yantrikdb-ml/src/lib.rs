@@ -42,7 +42,7 @@ pub use model_loader::{GGUFFiles, ModelFiles};
 
 // ── Shared type + trait exports ──────────────────────────────────────
 
-pub use types::{ChatMessage, GenerationConfig, LLMResponse, ToolCall, TranscribeResult, VoiceParams};
+pub use types::{ApiToolCall, ApiToolCallFunction, ChatMessage, GenerationConfig, LLMResponse, ToolCall, TranscribeResult, VoiceParams};
 pub use traits::{LLMBackend, STTBackend};
 
 // ── Chat template exports ────────────────────────────────────────────

@@ -262,6 +262,7 @@ impl LlamaCppLLM {
             prompt_tokens: prompt_len,
             completion_tokens,
             tool_calls,
+            api_tool_calls: Vec::new(),
             stop_reason,
         })
     }
@@ -385,13 +386,19 @@ impl LlamaCppLLM {
             prompt_tokens: prompt_len,
             completion_tokens,
             tool_calls,
+            api_tool_calls: Vec::new(),
             stop_reason,
         })
     }
 }
 
 impl LLMBackend for LlamaCppLLM {
-    fn chat(&self, messages: &[ChatMessage], config: &GenerationConfig) -> Result<LLMResponse> {
+    fn chat(
+        &self,
+        messages: &[ChatMessage],
+        config: &GenerationConfig,
+        _tools: Option<&[serde_json::Value]>,
+    ) -> Result<LLMResponse> {
         let mut inner = self.inner.lock().map_err(|e| anyhow::anyhow!("lock: {e}"))?;
         let prompt = Self::format_prompt(&inner.model, messages)?;
         Self::generate(&mut inner, &prompt, config)
@@ -401,6 +408,7 @@ impl LLMBackend for LlamaCppLLM {
         &self,
         messages: &[ChatMessage],
         config: &GenerationConfig,
+        _tools: Option<&[serde_json::Value]>,
         on_token: &mut dyn FnMut(&str),
     ) -> Result<LLMResponse> {
         let mut inner = self.inner.lock().map_err(|e| anyhow::anyhow!("lock: {e}"))?;

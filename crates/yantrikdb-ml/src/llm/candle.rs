@@ -325,6 +325,7 @@ impl CandleLLM {
             prompt_tokens: prompt_len,
             completion_tokens,
             tool_calls,
+            api_tool_calls: Vec::new(),
             stop_reason,
         })
     }
@@ -460,13 +461,19 @@ impl CandleLLM {
             prompt_tokens: prompt_len,
             completion_tokens,
             tool_calls,
+            api_tool_calls: Vec::new(),
             stop_reason,
         })
     }
 }
 
 impl LLMBackend for CandleLLM {
-    fn chat(&self, messages: &[ChatMessage], config: &GenerationConfig) -> Result<LLMResponse> {
+    fn chat(
+        &self,
+        messages: &[ChatMessage],
+        config: &GenerationConfig,
+        _tools: Option<&[serde_json::Value]>,
+    ) -> Result<LLMResponse> {
         self.chat(messages, config)
     }
 
@@ -474,6 +481,7 @@ impl LLMBackend for CandleLLM {
         &self,
         messages: &[ChatMessage],
         config: &GenerationConfig,
+        _tools: Option<&[serde_json::Value]>,
         on_token: &mut dyn FnMut(&str),
     ) -> Result<LLMResponse> {
         let prompt = chat_template::format_chat(messages);

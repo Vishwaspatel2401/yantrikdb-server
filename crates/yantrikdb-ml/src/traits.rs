@@ -16,15 +16,30 @@ use crate::types::{ChatMessage, GenerationConfig, LLMResponse, TranscribeResult}
 /// `ApiLLM` (OpenAI-compatible HTTP API).
 ///
 /// Uses `&mut dyn FnMut(&str)` for streaming to keep the trait object-safe.
+///
+/// The optional `tools` parameter passes OpenAI-format tool definitions to
+/// backends that support native tool calling (e.g. `ApiLLM` with `--jinja`).
+/// Local backends (candle, llama.cpp) ignore it and rely on text-injected
+/// tool definitions in the system prompt.
 pub trait LLMBackend: Send + Sync {
     /// Non-streaming chat completion.
-    fn chat(&self, messages: &[ChatMessage], config: &GenerationConfig) -> Result<LLMResponse>;
+    ///
+    /// `tools`: Optional OpenAI-format tool definitions for native tool calling.
+    fn chat(
+        &self,
+        messages: &[ChatMessage],
+        config: &GenerationConfig,
+        tools: Option<&[serde_json::Value]>,
+    ) -> Result<LLMResponse>;
 
     /// Streaming chat completion — calls `on_token` for each decoded text fragment.
+    ///
+    /// `tools`: Optional OpenAI-format tool definitions for native tool calling.
     fn chat_streaming(
         &self,
         messages: &[ChatMessage],
         config: &GenerationConfig,
+        tools: Option<&[serde_json::Value]>,
         on_token: &mut dyn FnMut(&str),
     ) -> Result<LLMResponse>;
 
