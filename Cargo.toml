@@ -3,7 +3,6 @@ resolver = "2"
 members = [
     "crates/yantrikdb-core",
     "crates/yantrikdb-python",
-    "crates/yantrikdb-ml",
 ]
 
 # Optimize dependencies (candle, tokenizers) even in dev builds.

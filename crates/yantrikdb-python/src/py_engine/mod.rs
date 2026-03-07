@@ -200,7 +200,7 @@ impl PyYantrikDB {
         // If model_dir provided and candle feature enabled, use CandleEmbedder
         #[cfg(feature = "candle")]
         if let Some(dir) = model_dir {
-            let candle_embedder = yantrikdb_ml::CandleEmbedder::from_dir(std::path::Path::new(dir))
+            let candle_embedder = yantrik_ml::CandleEmbedder::from_dir(std::path::Path::new(dir))
                 .map_err(|e| PyRuntimeError::new_err(format!("Failed to load candle embedder: {e}")))?;
             inner.set_embedder(Box::new(candle_embedder));
         }
