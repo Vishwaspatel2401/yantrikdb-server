@@ -1,6 +1,6 @@
 [package]
 name = "yantrikdb"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 license = "AGPL-3.0-only"
 description = "Cognitive memory engine for persistent AI systems"
@@ -10,7 +10,7 @@ keywords = ["ai", "memory", "cognitive", "database", "embeddings"]
 categories = ["database", "science"]
 
 [dependencies]
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
 uuid7 = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
