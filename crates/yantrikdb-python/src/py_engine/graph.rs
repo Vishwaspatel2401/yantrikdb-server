@@ -24,6 +24,19 @@ impl PyYantrikDB {
         edges.iter().map(|e| edge_to_dict(py, e)).collect()
     }
 
+    #[pyo3(signature = (pattern=None, entity_type=None, limit=20))]
+    fn search_entities(
+        &self,
+        py: Python<'_>,
+        pattern: Option<&str>,
+        entity_type: Option<&str>,
+        limit: usize,
+    ) -> PyResult<Vec<PyObject>> {
+        let db = self.get_inner()?;
+        let entities = db.search_entities(pattern, entity_type, limit).map_err(map_err)?;
+        entities.iter().map(|e| entity_to_dict(py, e)).collect()
+    }
+
     fn link_memory_entity(&self, memory_rid: &str, entity_name: &str) -> PyResult<()> {
         let db = self.get_inner()?;
         db.link_memory_entity(memory_rid, entity_name).map_err(map_err)

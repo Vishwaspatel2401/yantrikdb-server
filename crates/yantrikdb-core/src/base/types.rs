@@ -123,6 +123,16 @@ pub struct Edge {
     pub weight: f64,
 }
 
+/// An entity in the knowledge graph.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Entity {
+    pub name: String,
+    pub entity_type: String,
+    pub first_seen: f64,
+    pub last_seen: f64,
+    pub mention_count: i64,
+}
+
 /// Engine statistics.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Stats {

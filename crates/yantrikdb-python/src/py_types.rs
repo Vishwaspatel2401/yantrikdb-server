@@ -110,6 +110,17 @@ pub fn edge_to_dict(py: Python<'_>, e: &yantrikdb_core::Edge) -> PyResult<PyObje
     Ok(dict.into())
 }
 
+/// Convert an yantrikdb-core Entity to a Python dict.
+pub fn entity_to_dict(py: Python<'_>, e: &yantrikdb_core::Entity) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
+    dict.set_item("name", &e.name)?;
+    dict.set_item("entity_type", &e.entity_type)?;
+    dict.set_item("first_seen", e.first_seen)?;
+    dict.set_item("last_seen", e.last_seen)?;
+    dict.set_item("mention_count", e.mention_count)?;
+    Ok(dict.into())
+}
+
 /// Convert an yantrikdb-core DecayedMemory to a Python dict.
 pub fn decayed_to_dict(py: Python<'_>, d: &yantrikdb_core::DecayedMemory) -> PyResult<PyObject> {
     let dict = PyDict::new(py);

@@ -1,7 +1,7 @@
 use rusqlite::params;
 
 use crate::error::Result;
-use crate::types::Edge;
+use crate::types::{Edge, Entity};
 
 use super::{now, YantrikDB};
 
@@ -84,6 +84,67 @@ impl YantrikDB {
             .collect::<std::result::Result<Vec<_>, _>>()?;
 
         Ok(edges)
+    }
+
+    /// Search entities by name pattern. If pattern is None, returns all entities
+    /// ordered by most recently seen. Pattern uses SQL LIKE syntax (% for wildcard).
+    pub fn search_entities(
+        &self,
+        pattern: Option<&str>,
+        entity_type: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<Entity>> {
+        let (sql, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = match (pattern, entity_type) {
+            (Some(p), Some(t)) => (
+                "SELECT name, entity_type, first_seen, last_seen, mention_count \
+                 FROM entities WHERE name LIKE ?1 AND entity_type = ?2 \
+                 ORDER BY last_seen DESC LIMIT ?3".to_string(),
+                vec![
+                    Box::new(format!("%{}%", p)) as Box<dyn rusqlite::types::ToSql>,
+                    Box::new(t.to_string()),
+                    Box::new(limit as i64),
+                ],
+            ),
+            (Some(p), None) => (
+                "SELECT name, entity_type, first_seen, last_seen, mention_count \
+                 FROM entities WHERE name LIKE ?1 \
+                 ORDER BY last_seen DESC LIMIT ?2".to_string(),
+                vec![
+                    Box::new(format!("%{}%", p)) as Box<dyn rusqlite::types::ToSql>,
+                    Box::new(limit as i64),
+                ],
+            ),
+            (None, Some(t)) => (
+                "SELECT name, entity_type, first_seen, last_seen, mention_count \
+                 FROM entities WHERE entity_type = ?1 \
+                 ORDER BY last_seen DESC LIMIT ?2".to_string(),
+                vec![
+                    Box::new(t.to_string()) as Box<dyn rusqlite::types::ToSql>,
+                    Box::new(limit as i64),
+                ],
+            ),
+            (None, None) => (
+                "SELECT name, entity_type, first_seen, last_seen, mention_count \
+                 FROM entities ORDER BY last_seen DESC LIMIT ?1".to_string(),
+                vec![Box::new(limit as i64) as Box<dyn rusqlite::types::ToSql>],
+            ),
+        };
+
+        let mut stmt = self.conn.prepare(&sql)?;
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+        let entities = stmt
+            .query_map(param_refs.as_slice(), |row| {
+                Ok(Entity {
+                    name: row.get("name")?,
+                    entity_type: row.get("entity_type")?,
+                    first_seen: row.get("first_seen")?,
+                    last_seen: row.get("last_seen")?,
+                    mention_count: row.get("mention_count")?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        Ok(entities)
     }
 
     /// Link a memory to an entity for graph-augmented recall.
