@@ -1,9 +1,22 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-// ── Embedder trait (re-exported from yantrik-ml) ──
+// ── Embedder trait ──
 
-pub use yantrik_ml::Embedder;
+/// Trait for converting text to embedding vectors.
+/// Implementations can use any embedding model (sentence-transformers, candle, etc.).
+pub trait Embedder: Send + Sync {
+    /// Embed a single text string into a vector.
+    fn embed(&self, text: &str) -> std::result::Result<Vec<f32>, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Embed multiple texts. Default implementation calls embed() in a loop.
+    fn embed_batch(&self, texts: &[&str]) -> std::result::Result<Vec<Vec<f32>>, Box<dyn std::error::Error + Send + Sync>> {
+        texts.iter().map(|t| self.embed(t)).collect()
+    }
+
+    /// The dimensionality of produced embeddings.
+    fn dim(&self) -> usize;
+}
 
 /// A memory record returned by get() and recall().
 #[derive(Debug, Clone, Serialize, Deserialize)]
