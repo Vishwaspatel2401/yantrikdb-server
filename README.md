@@ -99,6 +99,15 @@ yantrikdb.decay(threshold=0.1)       // prune low-importance memories
 yantrikdb.forget(memory_id)          // explicit removal
 yantrikdb.conflict(memory_a, memory_b)  // flag contradiction
 yantrikdb.resolve(conflict_id, resolution)  // user-driven resolution
+
+// Session tracking — memories auto-link to the active session
+yantrikdb.session_start(namespace, client_id)
+yantrikdb.session_end(session_id)    // computes summary, topics, valence
+
+// Temporal awareness
+yantrikdb.stale(days=14)             // forgotten high-importance memories
+yantrikdb.upcoming(days=7)           // memories with approaching deadlines
+yantrikdb.entity_profile("Alice")    // valence, domains, frequency, trend
 ```
 
 ## Conflict Resolution — Human-in-the-Loop
@@ -217,8 +226,44 @@ Built-in safety constraints:
 1. **Consolidation pass** — compress, summarize, abstract
 2. **Conflict detection** — find contradictions across synced devices
 3. **Pattern mining** — "user tends to X when Y"
-4. **Trigger evaluation** — "is anything worth reaching out about?"
-5. **Decay pass** — age out low-importance memories
+4. **Cross-domain discovery** — find surprising connections between work, health, hobbies
+5. **Entity bridge detection** — identify people/concepts that span multiple domains
+6. **Trigger evaluation** — "is anything worth reaching out about?"
+7. **Decay pass** — age out low-importance memories
+8. **Session cleanup** — abandon stale sessions, compute summaries
+
+## Session Tracking & Temporal Awareness
+
+YantrikDB tracks conversation sessions as first-class engine primitives — not faked via metadata:
+
+```
+┌────────────────────────────────────────────────┐
+│              Session Lifecycle                  │
+│                                                │
+│  session_start("default", "mcp-server")        │
+│       ↓                                        │
+│  record() → auto-linked to active session      │
+│  record() → auto-linked to active session      │
+│  record() → auto-linked to active session      │
+│       ↓                                        │
+│  session_end() → computes:                     │
+│    • memory_count, avg_valence                 │
+│    • topic extraction from entity graph        │
+│    • duration                                  │
+└────────────────────────────────────────────────┘
+```
+
+**Temporal helpers** give the engine time awareness:
+
+- **`stale(days)`** — high-importance memories not accessed in N days ("I'm forgetting something important")
+- **`upcoming(days)`** — memories with deadlines approaching ("Your dentist appointment is Thursday")
+- **`entity_profile(entity, days)`** — rich profile: valence trend, domain distribution, session count, interaction frequency, dominant emotion
+
+**Cross-domain pattern mining** uses the HNSW vector index to find surprising connections between domains:
+
+- A work frustration pattern that correlates with health domain entries
+- An entity (person, concept) that bridges finance and family domains
+- Scored by `similarity × domain_surprise × entity_support` — common co-occurrences are penalized
 
 ## Technical Decisions
 
@@ -230,6 +275,8 @@ Built-in safety constraints:
 | **Storage format** | Single file per user | Portable, backupable, no infrastructure |
 | **Sync** | CRDTs + append-only log | Conflict-free for most operations, deterministic |
 | **Query interface** | Cognitive operations API | Not SQL — designed for how agents think |
+| **Sessions** | Engine-native tracking | Auto-links memories, computes valence/topics per session |
+| **Cross-domain mining** | HNSW-based | Uses existing vector index for O(k·n) instead of O(n²) pairwise |
 
 ## Target Use Cases
 
@@ -244,7 +291,8 @@ Built-in safety constraints:
 - [x] **V1** — Replication log, sync between two devices
 - [x] **V2** — Conflict resolution with human-in-the-loop, production-grade sync
 - [x] **V3** — Proactive cognition loop, pattern detection, trigger system
-- [ ] **V4** — Multi-agent shared memory, federated learning across users
+- [x] **V4** — Sessions, temporal awareness, cross-domain pattern mining, entity profiles
+- [ ] **V5** — Multi-agent shared memory, federated learning across users
 
 ## Research & Publications
 
