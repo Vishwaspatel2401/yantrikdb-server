@@ -1215,6 +1215,12 @@ impl YantrikDB {
 
             const MAX_BOOST_PER_MEMORY: f64 = 0.25;
             const MAX_GRAPH_FRACTION: f64 = 1.0;
+            const MAX_SEED_ENTITIES: usize = 8;
+
+            // Cap seed entities to prevent graph explosion with many entities
+            if seed_entities.len() > MAX_SEED_ENTITIES {
+                seed_entities.truncate(MAX_SEED_ENTITIES);
+            }
 
             if !seed_entities.is_empty() && base_boost > 0.0 {
                 let seed_refs: Vec<&str> = seed_entities.iter().map(|s| s.as_str()).collect();
@@ -2763,6 +2769,12 @@ impl YantrikDB {
 
             const MAX_BOOST_PER_MEMORY: f64 = 0.25;
             const MAX_GRAPH_FRACTION: f64 = 1.0;
+            const MAX_SEED_ENTITIES: usize = 8;
+
+            // Cap seed entities to prevent graph explosion with many entities
+            if seed_entities.len() > MAX_SEED_ENTITIES {
+                seed_entities.truncate(MAX_SEED_ENTITIES);
+            }
 
             if !seed_entities.is_empty() && base_boost > 0.0 {
                 let seed_refs: Vec<&str> = seed_entities.iter().map(|s| s.as_str()).collect();

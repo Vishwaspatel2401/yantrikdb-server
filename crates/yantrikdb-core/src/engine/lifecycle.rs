@@ -75,6 +75,127 @@ impl YantrikDB {
         }
     }
 
+    /// Browse memories with optional filters. Returns active memories sorted by the
+    /// given field. Useful for auditing stored data without a search query.
+    pub fn list_memories(
+        &self,
+        limit: usize,
+        offset: usize,
+        domain: Option<&str>,
+        memory_type: Option<&str>,
+        namespace: Option<&str>,
+        sort_by: &str,
+    ) -> Result<(Vec<Memory>, usize)> {
+        let order = match sort_by {
+            "importance" => "importance DESC",
+            "last_access" => "last_access DESC",
+            _ => "created_at DESC",
+        };
+
+        let mut conditions = vec!["consolidation_status = 'active'".to_string()];
+        let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        let mut idx = 1;
+
+        if let Some(d) = domain {
+            conditions.push(format!("domain = ?{idx}"));
+            param_values.push(Box::new(d.to_string()));
+            idx += 1;
+        }
+        if let Some(mt) = memory_type {
+            conditions.push(format!("type = ?{idx}"));
+            param_values.push(Box::new(mt.to_string()));
+            idx += 1;
+        }
+        if let Some(ns) = namespace {
+            conditions.push(format!("namespace = ?{idx}"));
+            param_values.push(Box::new(ns.to_string()));
+            idx += 1;
+        }
+
+        let where_clause = conditions.join(" AND ");
+
+        // Get total count
+        let count_sql = format!("SELECT COUNT(*) FROM memories WHERE {where_clause}");
+        let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+            param_values.iter().map(|p| p.as_ref()).collect();
+        let total: usize = self.conn.query_row(&count_sql, params_ref.as_slice(), |row| row.get(0))?;
+
+        // Fetch page
+        let sql = format!(
+            "SELECT rid, type, text, created_at, importance, valence, half_life, \
+             last_access, access_count, consolidation_status, storage_tier, \
+             consolidated_into, metadata, namespace, certainty, domain, source, \
+             emotional_state, session_id, due_at, temporal_kind \
+             FROM memories WHERE {where_clause} ORDER BY {order} LIMIT ?{idx} OFFSET ?{}",
+            idx + 1
+        );
+        param_values.push(Box::new(limit as i64));
+        param_values.push(Box::new(offset as i64));
+        let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+            param_values.iter().map(|p| p.as_ref()).collect();
+
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_ref.as_slice(), |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, f64>(3)?,
+                row.get::<_, f64>(4)?,
+                row.get::<_, f64>(5)?,
+                row.get::<_, f64>(6)?,
+                row.get::<_, f64>(7)?,
+                row.get::<_, i64>(8)?,
+                row.get::<_, String>(9)?,
+                row.get::<_, String>(10)?,
+                row.get::<_, Option<String>>(11)?,
+                row.get::<_, String>(12)?,
+                row.get::<_, String>(13)?,
+                row.get::<_, f64>(14)?,
+                row.get::<_, String>(15)?,
+                row.get::<_, String>(16)?,
+                row.get::<_, Option<String>>(17)?,
+                row.get::<_, Option<String>>(18)?,
+                row.get::<_, Option<f64>>(19)?,
+                row.get::<_, Option<String>>(20)?,
+            ))
+        })?;
+
+        let mut memories = Vec::new();
+        for row in rows {
+            let row = row?;
+            let text = self.decrypt_text(&row.2)?;
+            let meta_str = self.decrypt_text(&row.12)?;
+            let metadata: serde_json::Value = serde_json::from_str(&meta_str)
+                .unwrap_or(serde_json::Value::Object(Default::default()));
+            memories.push(Memory {
+                rid: row.0,
+                memory_type: row.1,
+                text,
+                created_at: row.3,
+                importance: row.4,
+                valence: row.5,
+                half_life: row.6,
+                last_access: row.7,
+                access_count: row.8 as u32,
+                consolidation_status: row.9,
+                storage_tier: row.10,
+                consolidated_into: row.11,
+                metadata,
+                namespace: row.13,
+                certainty: row.14,
+                domain: row.15,
+                source: row.16,
+                emotional_state: row.17,
+                session_id: row.18,
+                due_at: row.19,
+                temporal_kind: row.20,
+            });
+        }
+
+        Ok((memories, total))
+    }
+
     /// Find memories that have decayed below a threshold.
     #[tracing::instrument(skip(self))]
     pub fn decay(&self, threshold: f64) -> Result<Vec<DecayedMemory>> {

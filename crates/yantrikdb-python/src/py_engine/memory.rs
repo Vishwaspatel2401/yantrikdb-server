@@ -215,6 +215,27 @@ impl PyYantrikDB {
         db.forget(rid).map_err(map_err)
     }
 
+    #[pyo3(signature = (limit=50, offset=0, domain=None, memory_type=None, namespace=None, sort_by="created_at"))]
+    fn list_memories(
+        &self,
+        py: Python<'_>,
+        limit: usize,
+        offset: usize,
+        domain: Option<&str>,
+        memory_type: Option<&str>,
+        namespace: Option<&str>,
+        sort_by: &str,
+    ) -> PyResult<PyObject> {
+        let db = self.get_inner()?;
+        let (memories, total) = db.list_memories(limit, offset, domain, memory_type, namespace, sort_by).map_err(map_err)?;
+        let dict = pyo3::types::PyDict::new(py);
+        let items: Vec<PyObject> = memories.iter().map(|m| memory_to_dict(py, m)).collect::<PyResult<Vec<_>>>()?;
+        dict.set_item("memories", items)?;
+        dict.set_item("total", total)?;
+        dict.set_item("offset", offset)?;
+        Ok(dict.into())
+    }
+
     #[pyo3(signature = (threshold=0.01))]
     fn decay(&self, py: Python<'_>, threshold: f64) -> PyResult<Vec<PyObject>> {
         let db = self.get_inner()?;

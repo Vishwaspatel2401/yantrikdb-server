@@ -48,6 +48,40 @@ impl YantrikDB {
             gi.add_edge(src, dst, weight as f32);
         }
 
+        // Backfill memory_entities for newly-created entities.
+        // When remember() runs BEFORE relate(), the memory doesn't get linked
+        // because the entity doesn't exist yet. Fix: scan active memories for
+        // mentions of the src/dst entities and create links retroactively.
+        {
+            let mut stmt = self.conn.prepare_cached(
+                "SELECT rid, text FROM memories \
+                 WHERE consolidation_status = 'active' \
+                 AND rid NOT IN (SELECT memory_rid FROM memory_entities WHERE entity_name = ?1)"
+            )?;
+            for entity in [src, dst] {
+                let entity_tokens = crate::graph::tokenize(entity);
+                if entity_tokens.is_empty() {
+                    continue;
+                }
+                let rows: Vec<(String, String)> = stmt
+                    .query_map(params![entity], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                for (rid, stored_text) in &rows {
+                    let text = self.decrypt_text(stored_text).unwrap_or_else(|_| stored_text.clone());
+                    let text_tokens = crate::graph::tokenize(&text);
+                    if crate::graph::entity_matches_text(entity, &text_tokens) {
+                        self.conn.execute(
+                            "INSERT OR IGNORE INTO memory_entities (memory_rid, entity_name) VALUES (?1, ?2)",
+                            params![rid, entity],
+                        )?;
+                        self.graph_index.borrow_mut().link_memory(rid, entity);
+                    }
+                }
+            }
+        }
+
         self.log_op(
             "relate",
             Some(&edge_id),

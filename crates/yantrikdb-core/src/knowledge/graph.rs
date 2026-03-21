@@ -42,6 +42,15 @@ const TECH_BLOCKLIST: &[&str] = &[
     "numpy", "pandas", "spark", "hadoop", "nginx", "postgres", "mysql",
     "sqlite", "graphql", "grpc", "oauth", "jwt", "html", "css",
     "api", "sdk", "ml", "ai", "gpu", "cpu", "ram", "ssd", "aws", "gcp",
+    "claude", "openai", "anthropic", "gemini", "llama", "ollama",
+];
+
+/// Words that indicate the entity is NOT a person when used as first word.
+const NON_PERSON_PREFIXES: &[&str] = &[
+    "project", "team", "company", "group", "department", "org", "the",
+    "operation", "task", "plan", "system", "service", "app", "tool",
+    "code", "server", "client", "api", "db", "database", "agent",
+    "model", "version", "release", "build", "deploy", "config",
 ];
 
 /// Classify an entity name into a type: "person", "tech", or "unknown".
@@ -65,6 +74,7 @@ pub fn classify_entity_type(name: &str) -> &'static str {
     }
 
     // Multi-word title-case (e.g., "Priya Sharma", "Sarah Chen") → likely person
+    // But NOT if the first word is a non-person prefix (e.g., "Project Athena", "Claude Code")
     if trimmed.contains(' ') {
         let words: Vec<&str> = trimmed.split_whitespace().collect();
         if words.len() == 2
@@ -72,6 +82,14 @@ pub fn classify_entity_type(name: &str) -> &'static str {
                 .iter()
                 .all(|w| w.chars().next().map(|c| c.is_uppercase()).unwrap_or(false))
         {
+            let first_lower = words[0].to_lowercase();
+            if NON_PERSON_PREFIXES.contains(&first_lower.as_str()) {
+                return "unknown";
+            }
+            // Also reject if any word is in tech blocklist
+            if words.iter().any(|w| TECH_BLOCKLIST.contains(&w.to_lowercase().as_str())) {
+                return "tech";
+            }
             return "person";
         }
     }
