@@ -230,4 +230,13 @@ impl PyYantrikDB {
         let db = self.get_inner()?;
         db.learn_category_members(category_name, &members, source).map_err(map_err)
     }
+
+    #[pyo3(signature = (category_name))]
+    fn reset_category_to_seed(
+        &self,
+        category_name: &str,
+    ) -> PyResult<usize> {
+        let db = self.get_inner()?;
+        db.reset_category_to_seed(category_name).map_err(map_err)
+    }
 }

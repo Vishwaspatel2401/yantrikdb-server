@@ -5,6 +5,44 @@ use crate::types::*;
 
 use super::{now, YantrikDB};
 
+/// Common English stopwords that should never be added to substitution categories.
+const RECLASSIFY_STOPWORDS: &[&str] = &[
+    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
+    "have", "has", "had", "do", "does", "did", "will", "would", "could",
+    "should", "may", "might", "shall", "can", "must", "need",
+    "i", "me", "my", "we", "our", "you", "your", "he", "she", "it",
+    "they", "them", "their", "his", "her", "its", "this", "that", "these",
+    "those", "who", "what", "which", "where", "when", "how", "why",
+    "and", "or", "but", "if", "then", "else", "so", "yet", "nor",
+    "not", "no", "yes", "all", "any", "some", "every", "each",
+    "in", "on", "at", "to", "for", "of", "with", "by", "from", "up",
+    "about", "into", "over", "after", "before", "between", "under",
+    "again", "further", "more", "most", "other", "such", "than",
+    "too", "very", "just", "also", "now", "here", "there", "out",
+    "only", "own", "same", "both", "few", "many", "much", "well",
+    "back", "even", "still", "way", "new", "old", "one", "two",
+    "first", "last", "long", "great", "little", "right", "big",
+    "high", "low", "small", "large", "next", "early", "late",
+    "use", "uses", "used", "using", "like", "make", "made", "get",
+    "got", "take", "took", "come", "came", "go", "went", "see", "saw",
+    "know", "knew", "think", "thought", "want", "give", "gave",
+    "tell", "told", "work", "works", "call", "try", "ask", "put",
+    "keep", "let", "begin", "seem", "help", "show", "hear", "play",
+    "run", "move", "live", "believe", "bring", "happen", "write",
+    "provide", "sit", "stand", "lose", "pay", "meet", "include",
+    "continue", "set", "learn", "change", "lead", "understand",
+    "watch", "follow", "stop", "create", "speak", "read", "add",
+    "spend", "grow", "open", "walk", "win", "offer", "remember",
+    "love", "consider", "appear", "buy", "wait", "serve", "die",
+    "send", "expect", "build", "stay", "fall", "cut", "reach",
+    "remain", "suggest", "raise", "pass", "sell", "require",
+    "report", "decide", "pull", "develop", "always", "never",
+    "sometimes", "often", "usually", "really", "actually",
+    "probably", "already", "quite", "rather", "pretty",
+    "solves", "solved", "solving", "started", "starting", "finished",
+    "finishing", "before", "after", "during", "while", "until", "since",
+];
+
 impl YantrikDB {
     // ── Conflict resolution API (V2) ──
 
@@ -287,7 +325,7 @@ impl YantrikDB {
         let text_a = self.decrypt_text(&text_a).unwrap_or(text_a);
         let text_b = self.decrypt_text(&text_b).unwrap_or(text_b);
 
-        // Extract differing tokens
+        // Extract differing tokens (symmetric difference)
         let words_a: std::collections::HashSet<String> = text_a
             .split_whitespace()
             .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase())
@@ -309,92 +347,146 @@ impl YantrikDB {
         let mut learned_members = Vec::new();
         let mut category_created = None;
 
-        // For each diff token pair, try to learn category membership
-        for token_a in &diff_a {
-            for token_b in &diff_b {
-                // Check if either token already belongs to a category
-                let cat_a = self.find_member_category(token_a);
-                let cat_b = self.find_member_category(token_b);
+        // Pre-classify: find which diff tokens already belong to categories
+        let cats_a: Vec<(String, Option<(String, String)>)> = diff_a
+            .iter()
+            .map(|t| (t.clone(), self.find_member_category(t)))
+            .collect();
+        let cats_b: Vec<(String, Option<(String, String)>)> = diff_b
+            .iter()
+            .map(|t| (t.clone(), self.find_member_category(t)))
+            .collect();
 
-                match (cat_a, cat_b) {
-                    (Some((cat_id, cat_name)), None) => {
-                        // token_a has a category, add token_b to same category
-                        self.add_member_to_category(
-                            &cat_id, token_b, token_b,
-                            1.0, "user_confirmed", ts, &hlc_bytes, &actor,
-                        )?;
+        // Separate known-category tokens from unknown tokens
+        let known_a: Vec<(&str, &str, &str)> = cats_a.iter()
+            .filter_map(|(t, c)| c.as_ref().map(|(id, name)| (t.as_str(), id.as_str(), name.as_str())))
+            .collect();
+        let known_b: Vec<(&str, &str, &str)> = cats_b.iter()
+            .filter_map(|(t, c)| c.as_ref().map(|(id, name)| (t.as_str(), id.as_str(), name.as_str())))
+            .collect();
+
+        // Track which tokens have been processed to avoid double-adding
+        let mut processed: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        // Strategy 1: Both sides have known category members → reinforce or cross-learn
+        for &(token_a, cat_id_a, cat_name_a) in &known_a {
+            for &(token_b, cat_id_b, _cat_name_b) in &known_b {
+                if cat_id_a == cat_id_b {
+                    // Same category — reinforce confidence
+                    self.conn.execute(
+                        "UPDATE substitution_members SET confidence = 1.0, source = 'user_confirmed', updated_at = ?1
+                         WHERE category_id = ?2 AND (token_normalized = ?3 OR token_normalized = ?4)",
+                        params![ts, cat_id_a, token_a, token_b],
+                    )?;
+                    if processed.insert(token_a.to_string()) {
                         learned_members.push(LearnedMember {
-                            token: token_b.clone(),
-                            category_name: cat_name,
-                            is_new: true,
+                            token: token_a.to_string(),
+                            category_name: cat_name_a.to_string(),
+                            is_new: false,
                         });
                     }
-                    (None, Some((cat_id, cat_name))) => {
-                        // token_b has a category, add token_a to same category
-                        self.add_member_to_category(
-                            &cat_id, token_a, token_a,
-                            1.0, "user_confirmed", ts, &hlc_bytes, &actor,
-                        )?;
+                    if processed.insert(token_b.to_string()) {
                         learned_members.push(LearnedMember {
-                            token: token_a.clone(),
-                            category_name: cat_name,
-                            is_new: true,
+                            token: token_b.to_string(),
+                            category_name: cat_name_a.to_string(),
+                            is_new: false,
                         });
                     }
-                    (Some((cat_id_a, cat_name_a)), Some((cat_id_b, _cat_name_b))) => {
-                        if cat_id_a == cat_id_b {
-                            // Both in same category — reinforce confidence
-                            self.conn.execute(
-                                "UPDATE substitution_members SET confidence = 1.0, source = 'user_confirmed', updated_at = ?1
-                                 WHERE category_id = ?2 AND (token_normalized = ?3 OR token_normalized = ?4)",
-                                params![ts, cat_id_a, token_a, token_b],
-                            )?;
-                            learned_members.push(LearnedMember {
-                                token: token_a.clone(),
-                                category_name: cat_name_a.clone(),
-                                is_new: false,
-                            });
-                            learned_members.push(LearnedMember {
-                                token: token_b.clone(),
-                                category_name: cat_name_a,
-                                is_new: false,
-                            });
-                        }
-                        // Different categories: don't auto-merge, just log
-                    }
-                    (None, None) => {
-                        // Neither token in any category — check if this pair has recurred
-                        let recurrence = self.count_reclassify_pair_occurrences(token_a, token_b);
-                        if recurrence >= 1 {
-                            // Recurring pair → create provisional category
-                            let prov_name = format!(
-                                "learned_{}_{}", token_a, token_b
-                            );
-                            let cat_id = crate::id::new_id();
-                            self.conn.execute(
-                                "INSERT OR IGNORE INTO substitution_categories
-                                 (id, name, conflict_mode, status, created_at, updated_at, hlc, origin_actor)
-                                 VALUES (?1, ?2, 'exclusive', 'provisional', ?3, ?3, ?4, ?5)",
-                                params![cat_id, prov_name, ts, hlc_bytes, actor],
-                            )?;
-                            self.add_member_to_category(
-                                &cat_id, token_a, token_a,
-                                1.0, "user_confirmed", ts, &hlc_bytes, &actor,
-                            )?;
-                            self.add_member_to_category(
-                                &cat_id, token_b, token_b,
-                                1.0, "user_confirmed", ts, &hlc_bytes, &actor,
-                            )?;
-                            category_created = Some(prov_name.clone());
-                            learned_members.push(LearnedMember {
-                                token: token_a.clone(), category_name: prov_name.clone(), is_new: true,
-                            });
-                            learned_members.push(LearnedMember {
-                                token: token_b.clone(), category_name: prov_name, is_new: true,
-                            });
-                        }
-                        // First occurrence: just log in oplog as evidence (below)
-                    }
+                }
+                // Different categories: don't auto-merge
+            }
+        }
+
+        // Strategy 2: One side has a known member, other side doesn't
+        // Only add the BEST matching unknown token per category (not all unknowns)
+        // Filter out stopwords and very short tokens
+        let is_meaningful = |t: &str| -> bool {
+            t.len() >= 3 && !RECLASSIFY_STOPWORDS.contains(&t)
+        };
+
+        // known_a tokens → find best unknown match in diff_b
+        for &(token_a, cat_id_a, cat_name_a) in &known_a {
+            if processed.contains(token_a) { continue; }
+            let unknown_b: Vec<&str> = diff_b.iter()
+                .map(|s| s.as_str())
+                .filter(|t| is_meaningful(t) && !processed.contains(*t) && self.find_member_category(t).is_none())
+                .collect();
+            // Only learn if there's exactly one meaningful unknown — ambiguity = skip
+            if unknown_b.len() == 1 {
+                let token_b = unknown_b[0];
+                self.add_member_to_category(
+                    cat_id_a, token_b, token_b,
+                    1.0, "user_confirmed", ts, &hlc_bytes, &actor,
+                )?;
+                processed.insert(token_b.to_string());
+                learned_members.push(LearnedMember {
+                    token: token_b.to_string(),
+                    category_name: cat_name_a.to_string(),
+                    is_new: true,
+                });
+            }
+        }
+
+        // known_b tokens → find best unknown match in diff_a
+        for &(token_b, cat_id_b, cat_name_b) in &known_b {
+            if processed.contains(token_b) { continue; }
+            let unknown_a: Vec<&str> = diff_a.iter()
+                .map(|s| s.as_str())
+                .filter(|t| is_meaningful(t) && !processed.contains(*t) && self.find_member_category(t).is_none())
+                .collect();
+            if unknown_a.len() == 1 {
+                let token_a = unknown_a[0];
+                self.add_member_to_category(
+                    cat_id_b, token_a, token_a,
+                    1.0, "user_confirmed", ts, &hlc_bytes, &actor,
+                )?;
+                processed.insert(token_a.to_string());
+                learned_members.push(LearnedMember {
+                    token: token_a.to_string(),
+                    category_name: cat_name_b.to_string(),
+                    is_new: true,
+                });
+            }
+        }
+
+        // Strategy 3: Neither side known — only create provisional category
+        // for recurring meaningful-token pairs (requires 2+ prior occurrences)
+        if known_a.is_empty() && known_b.is_empty() {
+            let meaningful_a: Vec<&str> = diff_a.iter()
+                .map(|s| s.as_str())
+                .filter(|t| is_meaningful(t))
+                .collect();
+            let meaningful_b: Vec<&str> = diff_b.iter()
+                .map(|s| s.as_str())
+                .filter(|t| is_meaningful(t))
+                .collect();
+
+            if meaningful_a.len() == 1 && meaningful_b.len() == 1 {
+                let ta = meaningful_a[0];
+                let tb = meaningful_b[0];
+                let recurrence = self.count_reclassify_pair_occurrences(ta, tb);
+                if recurrence >= 1 {
+                    let prov_name = format!("learned_{}_{}", ta, tb);
+                    let cat_id = crate::id::new_id();
+                    self.conn.execute(
+                        "INSERT OR IGNORE INTO substitution_categories
+                         (id, name, conflict_mode, status, created_at, updated_at, hlc, origin_actor)
+                         VALUES (?1, ?2, 'exclusive', 'provisional', ?3, ?3, ?4, ?5)",
+                        params![cat_id, prov_name, ts, hlc_bytes, actor],
+                    )?;
+                    self.add_member_to_category(
+                        &cat_id, ta, ta, 1.0, "user_confirmed", ts, &hlc_bytes, &actor,
+                    )?;
+                    self.add_member_to_category(
+                        &cat_id, tb, tb, 1.0, "user_confirmed", ts, &hlc_bytes, &actor,
+                    )?;
+                    category_created = Some(prov_name.clone());
+                    learned_members.push(LearnedMember {
+                        token: ta.to_string(), category_name: prov_name.clone(), is_new: true,
+                    });
+                    learned_members.push(LearnedMember {
+                        token: tb.to_string(), category_name: prov_name, is_new: true,
+                    });
                 }
             }
         }
@@ -561,6 +653,35 @@ impl YantrikDB {
         )?;
 
         Ok(added)
+    }
+
+    /// Reset a substitution category to its seed state by removing all non-seed members.
+    /// Returns the number of members removed.
+    pub fn reset_category_to_seed(&self, category_name: &str) -> Result<usize> {
+        let cat_id: String = self.conn.query_row(
+            "SELECT id FROM substitution_categories WHERE name = ?1",
+            params![category_name],
+            |row| row.get(0),
+        ).map_err(|_| YantrikDbError::NotFound(format!("category: {}", category_name)))?;
+
+        let removed = self.conn.execute(
+            "DELETE FROM substitution_members
+             WHERE category_id = ?1 AND source != 'seed'",
+            params![cat_id],
+        )?;
+
+        self.log_op(
+            "category_reset",
+            None,
+            &serde_json::json!({
+                "category_id": cat_id,
+                "category_name": category_name,
+                "members_removed": removed,
+            }),
+            None,
+        )?;
+
+        Ok(removed)
     }
 
     // ── Internal helpers for substitution categories ──

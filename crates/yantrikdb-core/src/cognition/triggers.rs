@@ -303,6 +303,37 @@ pub fn check_redundancy(db: &YantrikDB, _sim_threshold: f64) -> Result<Vec<Trigg
                         suggested_action: "review_conflict".to_string(),
                         context,
                     });
+                } else if let Some((cat_name, token_a, token_b)) =
+                    check_substitution_category_pair(conn, &rows[i].1, &rows[j].1)
+                {
+                    // Substitution category match → create actual conflict record
+                    let reason = format!(
+                        "{} substitution: '{}' vs '{}' (similarity={:.0}%)",
+                        cat_name, token_a, token_b, sim * 100.0
+                    );
+                    if !crate::conflict::conflict_exists(db, &rows[i].0, &rows[j].0).unwrap_or(true) {
+                        let conflict_type = crate::distributed::conflict::category_to_conflict_type(&cat_name);
+                        let _ = crate::conflict::create_conflict(
+                            db,
+                            &conflict_type,
+                            &rows[i].0,
+                            &rows[j].0,
+                            None,
+                            None,
+                            &reason,
+                        );
+                    }
+                    context.insert("category".to_string(), serde_json::json!(cat_name));
+                    context.insert("token_a".to_string(), serde_json::json!(token_a));
+                    context.insert("token_b".to_string(), serde_json::json!(token_b));
+                    triggers.push(Trigger {
+                        trigger_type: "potential_conflict".to_string(),
+                        reason,
+                        urgency: sim,
+                        source_rids: vec![rows[i].0.clone(), rows[j].0.clone()],
+                        suggested_action: "review_conflict".to_string(),
+                        context,
+                    });
                 } else {
                     triggers.push(Trigger {
                         trigger_type: "redundancy".to_string(),
@@ -313,6 +344,57 @@ pub fn check_redundancy(db: &YantrikDB, _sim_threshold: f64) -> Result<Vec<Trigg
                         urgency: sim,
                         source_rids: vec![rows[i].0.clone(), rows[j].0.clone()],
                         suggested_action: "consolidate_or_forget".to_string(),
+                        context,
+                    });
+                }
+            }
+        }
+    }
+
+    // Second pass: lower threshold for substitution category conflicts.
+    // Substituting "PostgreSQL" for "MySQL" drops cosine similarity to ~0.80,
+    // below the 0.85 redundancy threshold. Check pairs in [0.65, 0.85] range
+    // specifically for category-based substitution.
+    let cat_threshold = 0.65;
+    for i in 0..rows.len() {
+        for j in (i + 1)..rows.len() {
+            let emb_a = crate::serde_helpers::deserialize_f32(&rows[i].2);
+            let emb_b = crate::serde_helpers::deserialize_f32(&rows[j].2);
+            let sim = crate::consolidate::cosine_similarity(&emb_a, &emb_b);
+
+            if sim > cat_threshold && sim <= threshold {
+                if let Some((cat_name, token_a, token_b)) =
+                    check_substitution_category_pair(conn, &rows[i].1, &rows[j].1)
+                {
+                    let reason = format!(
+                        "{} substitution: '{}' vs '{}' (similarity={:.0}%)",
+                        cat_name, token_a, token_b, sim * 100.0
+                    );
+                    if !crate::conflict::conflict_exists(db, &rows[i].0, &rows[j].0).unwrap_or(true) {
+                        let conflict_type = crate::distributed::conflict::category_to_conflict_type(&cat_name);
+                        let _ = crate::conflict::create_conflict(
+                            db,
+                            &conflict_type,
+                            &rows[i].0,
+                            &rows[j].0,
+                            None,
+                            None,
+                            &reason,
+                        );
+                    }
+                    let mut context = HashMap::new();
+                    context.insert("text_a".to_string(), serde_json::json!(rows[i].1));
+                    context.insert("text_b".to_string(), serde_json::json!(rows[j].1));
+                    context.insert("similarity".to_string(), serde_json::json!(sim));
+                    context.insert("category".to_string(), serde_json::json!(cat_name));
+                    context.insert("token_a".to_string(), serde_json::json!(token_a));
+                    context.insert("token_b".to_string(), serde_json::json!(token_b));
+                    triggers.push(Trigger {
+                        trigger_type: "potential_conflict".to_string(),
+                        reason,
+                        urgency: sim,
+                        source_rids: vec![rows[i].0.clone(), rows[j].0.clone()],
+                        suggested_action: "review_conflict".to_string(),
                         context,
                     });
                 }
@@ -719,6 +801,51 @@ fn parse_persisted_trigger(row: &rusqlite::Row<'_>) -> rusqlite::Result<Persiste
         acted_at: row.get("acted_at")?,
         expires_at: row.get("expires_at")?,
     })
+}
+
+/// Check if two memory texts differ by tokens in the same substitution category.
+/// Returns (category_name, token_a, token_b) if a match is found.
+fn check_substitution_category_pair(
+    conn: &rusqlite::Connection,
+    text_a: &str,
+    text_b: &str,
+) -> Option<(String, String, String)> {
+    let words_a: std::collections::HashSet<String> = text_a
+        .split_whitespace()
+        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase())
+        .filter(|w| !w.is_empty())
+        .collect();
+    let words_b: std::collections::HashSet<String> = text_b
+        .split_whitespace()
+        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase())
+        .filter(|w| !w.is_empty())
+        .collect();
+
+    let diff_a: Vec<&String> = words_a.difference(&words_b).collect();
+    let diff_b: Vec<&String> = words_b.difference(&words_a).collect();
+
+    // Check each diff token pair against substitution_members
+    for ta in &diff_a {
+        for tb in &diff_b {
+            let result: std::result::Result<(String,), _> = conn.query_row(
+                "SELECT c.name FROM substitution_members m1
+                 JOIN substitution_members m2 ON m1.category_id = m2.category_id
+                 JOIN substitution_categories c ON c.id = m1.category_id
+                 WHERE m1.token_normalized = ?1 AND m2.token_normalized = ?2
+                   AND m1.status = 'active' AND m2.status = 'active'
+                   AND m1.confidence >= 0.6 AND m2.confidence >= 0.6
+                   AND c.status = 'active' AND c.conflict_mode = 'exclusive'
+                 LIMIT 1",
+                params![ta.as_str(), tb.as_str()],
+                |row| Ok((row.get::<_, String>(0)?,)),
+            );
+            if let Ok((cat_name,)) = result {
+                return Some((cat_name, ta.to_string(), tb.to_string()));
+            }
+        }
+    }
+
+    None
 }
 
 #[cfg(test)]

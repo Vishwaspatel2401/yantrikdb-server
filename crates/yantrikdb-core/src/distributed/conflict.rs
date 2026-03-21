@@ -284,9 +284,18 @@ fn classify_entity_substitution(
     (ConflictType::Minor, None)
 }
 
+/// Map a substitution category name to the appropriate ConflictType.
+pub(crate) fn category_to_conflict_type(cat_name: &str) -> ConflictType {
+    if IDENTITY_CATEGORIES.contains(&cat_name) {
+        ConflictType::IdentityFact
+    } else {
+        ConflictType::Preference
+    }
+}
+
 /// Check if a conflict already exists for this (memory_a, memory_b) pair.
 /// Checks both orderings.
-fn conflict_exists(db: &YantrikDB, rid_a: &str, rid_b: &str) -> Result<bool> {
+pub(crate) fn conflict_exists(db: &YantrikDB, rid_a: &str, rid_b: &str) -> Result<bool> {
     let conn = db.conn();
     let exists: bool = conn.query_row(
         "SELECT COUNT(*) > 0 FROM conflicts
