@@ -133,16 +133,20 @@ pub fn find_consolidation_candidates(
     sim_threshold: f64,
     time_window_days: f64,
     min_cluster_size: usize,
+    limit: usize,
 ) -> Result<Vec<Vec<MemoryWithEmbedding>>> {
     let conn = db.conn();
-    let mut stmt = conn.prepare(
+    let sql = format!(
         "SELECT rid, type, text, embedding, created_at, importance, valence, \
          half_life, last_access, metadata, namespace \
          FROM memories \
          WHERE consolidation_status = 'active' \
          AND storage_tier = 'hot' \
-         AND type IN ('episodic', 'semantic')",
-    )?;
+         AND type IN ('episodic', 'semantic') \
+         LIMIT {}",
+        limit
+    );
+    let mut stmt = conn.prepare(&sql)?;
 
     let raw_rows: Vec<(String, String, String, Vec<u8>, f64, f64, f64, f64, f64, String, String)> = stmt
         .query_map([], |row| {
@@ -209,9 +213,10 @@ pub fn consolidate(
     sim_threshold: f64,
     time_window_days: f64,
     min_cluster_size: usize,
+    limit: usize,
     dry_run: bool,
 ) -> Result<Vec<serde_json::Value>> {
-    let clusters = find_consolidation_candidates(db, sim_threshold, time_window_days, min_cluster_size)?;
+    let clusters = find_consolidation_candidates(db, sim_threshold, time_window_days, min_cluster_size, limit)?;
 
     if dry_run {
         return Ok(clusters

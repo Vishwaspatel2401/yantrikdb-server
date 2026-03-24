@@ -22,6 +22,9 @@ impl PyYantrikDB {
             if let Ok(Some(v)) = d.get_item("run_pattern_mining") { c.run_pattern_mining = v.extract()?; }
             if let Ok(Some(v)) = d.get_item("min_active_memories") { c.min_active_memories = v.extract()?; }
             if let Ok(Some(v)) = d.get_item("run_personality") { c.run_personality = v.extract()?; }
+            if let Ok(Some(v)) = d.get_item("consolidation_limit") { c.consolidation_limit = v.extract()?; }
+            if let Ok(Some(v)) = d.get_item("consolidation_time_window_days") { c.consolidation_time_window_days = v.extract()?; }
+            if let Ok(Some(v)) = d.get_item("consolidation_sim_threshold") { c.consolidation_sim_threshold = v.extract()?; }
             c
         } else {
             yantrikdb_core::ThinkConfig::default()

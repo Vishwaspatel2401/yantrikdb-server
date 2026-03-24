@@ -63,13 +63,14 @@ pub fn py_find_clusters(
 
 /// Find consolidation candidates.
 #[pyfunction]
-#[pyo3(signature = (db, sim_threshold=0.6, time_window_days=7.0, min_cluster_size=2))]
+#[pyo3(signature = (db, sim_threshold=0.6, time_window_days=7.0, min_cluster_size=2, limit=100))]
 pub fn find_consolidation_candidates(
     py: Python<'_>,
     db: &PyYantrikDB,
     sim_threshold: f64,
     time_window_days: f64,
     min_cluster_size: usize,
+    limit: usize,
 ) -> PyResult<Vec<Vec<PyObject>>> {
     let inner = db.get_inner()?;
     let clusters = yantrikdb_core::consolidate::find_consolidation_candidates(
@@ -77,6 +78,7 @@ pub fn find_consolidation_candidates(
         sim_threshold,
         time_window_days,
         min_cluster_size,
+        limit,
     )
     .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
 
@@ -94,13 +96,14 @@ pub fn find_consolidation_candidates(
 
 /// Run the full consolidation pipeline.
 #[pyfunction]
-#[pyo3(name = "consolidate", signature = (db, sim_threshold=0.6, time_window_days=7.0, min_cluster_size=2, dry_run=false))]
+#[pyo3(name = "consolidate", signature = (db, sim_threshold=0.6, time_window_days=7.0, min_cluster_size=2, limit=100, dry_run=false))]
 pub fn py_consolidate(
     py: Python<'_>,
     db: &PyYantrikDB,
     sim_threshold: f64,
     time_window_days: f64,
     min_cluster_size: usize,
+    limit: usize,
     dry_run: bool,
 ) -> PyResult<Vec<PyObject>> {
     let inner = db.get_inner()?;
@@ -109,6 +112,7 @@ pub fn py_consolidate(
         sim_threshold,
         time_window_days,
         min_cluster_size,
+        limit,
         dry_run,
     )
     .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;

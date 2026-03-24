@@ -58,6 +58,7 @@ impl YantrikDB {
                     config.consolidation_sim_threshold,
                     config.consolidation_time_window_days,
                     config.consolidation_min_cluster,
+                    config.consolidation_limit,
                     false,
                 )?;
                 results.len()

@@ -173,6 +173,7 @@ impl YantrikDB {
             0.85,  // similarity threshold
             30.0,  // time window days
             2,     // min cluster size
+            100,   // consolidation limit
             false, // not dry run
         )?;
         Ok(())

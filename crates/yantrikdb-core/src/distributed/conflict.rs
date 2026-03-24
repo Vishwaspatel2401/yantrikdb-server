@@ -480,6 +480,11 @@ pub fn detect_edge_conflicts(
 /// Full-database conflict scan. Finds all edge-based contradictions
 /// and concurrent consolidation conflicts.
 pub fn scan_conflicts(db: &YantrikDB) -> Result<Vec<Conflict>> {
+    scan_conflicts_limited(db, 50)
+}
+
+/// Scan for conflicts with a limit on max conflicts to detect per scan.
+pub fn scan_conflicts_limited(db: &YantrikDB, max_conflicts: usize) -> Result<Vec<Conflict>> {
     let mut conflicts = Vec::new();
 
     // Phase 1: Collect edge-based conflict candidates while holding conn lock.
@@ -612,11 +617,16 @@ pub fn scan_conflicts(db: &YantrikDB) -> Result<Vec<Conflict>> {
         let mut seen_pairs: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
 
         for (entity, memories) in &entity_groups {
+            if conflicts.len() >= max_conflicts {
+                break;
+            }
             if memories.len() < 2 {
                 continue;
             }
-            for i in 0..memories.len() {
-                for j in (i + 1)..memories.len() {
+            // Cap pairwise comparisons per entity to avoid O(n²) blowup
+            let mem_limit = memories.len().min(20);
+            for i in 0..mem_limit {
+                for j in (i + 1)..mem_limit {
                     let (ref rid_a, ref text_a, ref emb_a) = memories[i];
                     let (ref rid_b, ref text_b, ref emb_b) = memories[j];
 
