@@ -538,15 +538,20 @@ pub fn scan_conflicts_limited(db: &YantrikDB, max_conflicts: usize) -> Result<Ve
         }
         edge_candidates = candidates;
 
-        // Scan for entity-based semantic conflicts
-        let mut entity_mem_stmt = conn.prepare(
+        // Scan for entity-based semantic conflicts (cap to recent memories).
+        // Limit scales with max_conflicts to keep incremental calls fast.
+        let entity_scan_limit = (max_conflicts * 10).max(50).min(200);
+        let entity_query = format!(
             "SELECT me.entity_name, m.rid, m.text, m.embedding
              FROM memory_entities me
              JOIN memories m ON m.rid = me.memory_rid
              WHERE m.consolidation_status = 'active'
              AND m.embedding IS NOT NULL
-             ORDER BY me.entity_name",
-        )?;
+             ORDER BY m.created_at DESC
+             LIMIT {}",
+            entity_scan_limit
+        );
+        let mut entity_mem_stmt = conn.prepare(&entity_query)?;
 
         let em_rows: Vec<(String, String, String, Vec<u8>)> = entity_mem_stmt
             .query_map([], |row| {

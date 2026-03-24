@@ -40,8 +40,9 @@ impl YantrikDB {
 
         // Phase 2: Scan for conflicts BEFORE consolidation
         // (so contradictions are flagged before similar memories get merged)
+        // Uses consolidation_limit to cap work per call (incremental processing).
         let conflicts_found = if config.run_conflict_scan {
-            crate::conflict::scan_conflicts(self)?.len()
+            crate::conflict::scan_conflicts_limited(self, config.consolidation_limit)?.len()
         } else {
             0
         };

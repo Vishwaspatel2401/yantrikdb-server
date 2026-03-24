@@ -433,11 +433,11 @@ impl Default for ThinkConfig {
             max_triggers: 10,
             run_consolidation: true,
             run_conflict_scan: true,
-            run_pattern_mining: true,
+            run_pattern_mining: false,
             consolidation_sim_threshold: 0.6,
             consolidation_time_window_days: 7.0,
             consolidation_min_cluster: 2,
-            consolidation_limit: 100,
+            consolidation_limit: 5,
             min_active_memories: 10,
             run_personality: true,
         }

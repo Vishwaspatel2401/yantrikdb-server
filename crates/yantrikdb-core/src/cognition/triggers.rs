@@ -239,7 +239,7 @@ pub fn check_redundancy(db: &YantrikDB, _sim_threshold: f64) -> Result<Vec<Trigg
              WHERE consolidation_status = 'active' \
              AND embedding IS NOT NULL \
              ORDER BY created_at DESC \
-             LIMIT 100",
+             LIMIT 30",
         )?;
 
         let raw_rows: Vec<(String, String, Vec<u8>)> = stmt
