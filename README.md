@@ -2,37 +2,103 @@
 
 > The memory engine for AI that actually knows you.
 
+[![PyPI](https://img.shields.io/pypi/v/yantrikdb)](https://pypi.org/project/yantrikdb/)
+[![Crates.io](https://img.shields.io/crates/v/yantrikdb)](https://crates.io/crates/yantrikdb)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
+
+## Get Started in 60 Seconds
+
+### For AI agents (MCP — works with Claude, Cursor, Windsurf, Copilot)
+
+```bash
+pip install yantrikdb-mcp
+```
+
+Add to your MCP client config:
+
+```json
+{
+  "mcpServers": {
+    "yantrikdb": {
+      "command": "yantrikdb-mcp"
+    }
+  }
+}
+```
+
+That's it. The agent auto-recalls context, auto-remembers decisions, and auto-detects contradictions — no prompting needed. See [yantrikdb-mcp](https://github.com/yantrikos/yantrikdb-mcp) for full docs.
+
+### As a Python library
+
+```bash
+pip install yantrikdb
+```
+
+```python
+import yantrikdb
+from sentence_transformers import SentenceTransformer
+
+# Single file, no server, no config
+db = yantrikdb.YantrikDB("memory.db", embedding_dim=384)
+db.set_embedder(SentenceTransformer("all-MiniLM-L6-v2"))
+
+# Record memories with importance, domain, and emotional valence
+db.record("Alice is the engineering lead", importance=0.8, domain="people")
+db.record("Project deadline is March 30", importance=0.9, domain="work")
+db.record("User prefers dark mode", importance=0.6, domain="preference")
+
+# Semantic recall — ranked by relevance, recency, importance, and graph proximity
+results = db.recall("who leads the team?", top_k=3)
+# → [{"text": "Alice is the engineering lead", "score": 1.0}, ...]
+
+# Knowledge graph — entity relationships
+db.relate("Alice", "Engineering", "leads")
+db.get_edges("Alice")
+# → [{"src": "Alice", "dst": "Engineering", "rel_type": "leads", "weight": 1.0}]
+
+# Cognitive maintenance — consolidate, detect conflicts, mine patterns
+db.think()
+# → {"consolidation_count": 2, "conflicts_found": 0, "patterns_new": 1}
+
+db.close()
+```
+
+### As a Rust crate
+
+```toml
+[dependencies]
+yantrikdb = "0.4"
+```
+
 ## The Problem
 
-Current AI systems have no coherent memory architecture. They bolt together generic databases — vector stores, knowledge graphs, key-value caches — none of which were designed for how cognition works. This makes persistent, evolving AI relationships impossible at scale.
-
-Today's AI memory is:
+Current AI memory is:
 
 > Store everything → Embed → Retrieve top-k → Inject into context → Hope it helps.
 
-That does not scale cognitively.
+That's not memory. That's a search engine with extra steps.
 
-## The Thesis
+Real memory is hierarchical, compressed, contextual, self-updating, emotionally weighted, time-aware, and predictive. YantrikDB is built for that.
 
-AI needs a purpose-built memory engine with native support for:
-
-- **Temporal decay** — memories age and fade like human memory
-- **Semantic consolidation** — patterns are extracted, redundancy is compressed
-- **Conflict resolution** — contradictions are detected and resolved conversationally
-- **Multi-device replication** — local-first CRDT-based sync across devices
-- **Proactive cognition** — background processing that gives AI genuine reasons to initiate conversation
-
-All in a **single embedded engine** — no server, no network hops, no stitching together five databases.
-
-## Why Not Use Existing Solutions?
+## Why Not Existing Solutions?
 
 | Solution | What it does | What it lacks |
 |----------|-------------|---------------|
-| **Vector DBs** (Pinecone, Weaviate, Milvus) | High-dimensional nearest-neighbor lookup | No time awareness, no causality, no compression, no self-organization |
-| **Knowledge Graphs** (Neo4j) | Structured relations, entity linking | Hard to scale dynamically, poor for fuzzy memory, not adaptive |
-| **Memory Frameworks** (LangChain, LlamaIndex) | Retrieval wrappers, context injection | Not true memory architectures — just middleware |
+| **Vector DBs** (Pinecone, Weaviate) | Nearest-neighbor lookup | No decay, no causality, no self-organization |
+| **Knowledge Graphs** (Neo4j) | Structured relations | Poor for fuzzy memory, not adaptive |
+| **Memory Frameworks** (LangChain, Mem0) | Retrieval wrappers | Not a memory architecture — just middleware |
+| **File-based** (CLAUDE.md, memory files) | Dump everything into context | O(n) token cost, no relevance filtering |
 
-Human memory is hierarchical, compressed, contextual, self-updating, emotionally weighted, time-aware, and predictive. No existing system addresses this holistically.
+### Benchmark: Selective Recall vs. File-Based Memory
+
+| Memories | File-Based | YantrikDB | Token Savings | Precision |
+|----------|-----------|-----------|---------------|-----------|
+| 100 | 1,770 tokens | 69 tokens | **96%** | 66% |
+| 500 | 9,807 tokens | 72 tokens | **99.3%** | 77% |
+| 1,000 | 19,988 tokens | 72 tokens | **99.6%** | 84% |
+| 5,000 | 101,739 tokens | 53 tokens | **99.9%** | 88% |
+
+At 500 memories, file-based exceeds 32K context windows. At 5,000, it doesn't fit in any context window — not even 200K. YantrikDB stays at ~70 tokens per query. Precision *improves* with more data — the opposite of context stuffing.
 
 ## Architecture
 
@@ -42,254 +108,148 @@ Human memory is hierarchical, compressed, contextual, self-updating, emotionally
 - **Local-first, sync-native** — works offline, syncs when connected
 - **Cognitive operations, not SQL** — `record()`, `recall()`, `relate()`, not `SELECT`
 - **Living system, not passive store** — does work between conversations
+- **Thread-safe** — `Send + Sync` with internal Mutex/RwLock, safe for concurrent access
 
-### Unified Index Architecture
-
-Five index types in one engine, sharing the same memory pages, WAL, and query planner:
+### Five Indexes, One Engine
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                  YantrikDB Engine                         │
-│                                                     │
-│  ┌───────────┬───────────┬───────────┬───────────┐ │
-│  │  Vector   │  Graph    │ Temporal  │   Decay   │ │
-│  │  Index    │  Index    │  Index    │   Heap    │ │
-│  │  (HNSW)  │ (Entities)│ (Events)  │(Priority) │ │
-│  └───────────┴───────────┴───────────┴───────────┘ │
-│  ┌───────────┐                                      │
-│  │ Key-Value │                                      │
-│  │  Store    │                                      │
-│  └───────────┘                                      │
-│                                                     │
-│  ┌───────────────────────────────────────────────┐  │
-│  │         Write-Ahead Log (WAL)                 │  │
-│  └───────────────────────────────────────────────┘  │
-│  ┌───────────────────────────────────────────────┐  │
-│  │      Replication Log (append-only)            │  │
-│  │      CRDT-based conflict resolution           │  │
-│  └───────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│                   YantrikDB Engine                    │
+│                                                      │
+│  ┌──────────┬──────────┬──────────┬──────────┐       │
+│  │  Vector  │  Graph   │ Temporal │  Decay   │       │
+│  │  (HNSW)  │(Entities)│ (Events) │  (Heap)  │       │
+│  └──────────┴──────────┴──────────┴──────────┘       │
+│  ┌──────────┐                                        │
+│  │ Key-Value│  WAL + Replication Log (CRDT)          │
+│  └──────────┘                                        │
+└──────────────────────────────────────────────────────┘
 ```
 
 1. **Vector Index (HNSW)** — semantic similarity search across memories
-2. **Graph Index** — entity relationships ("Max is user's dog", "user works at Meta")
-3. **Temporal Index** — time-series style, "what happened around Tuesday"
-4. **Decay Heap** — priority queue with importance scores that degrade over time
-5. **Key-Value Store** — fast facts ("user's name is Pranab")
+2. **Graph Index** — entity relationships, profile aggregation, bridge detection
+3. **Temporal Index** — time-aware queries ("what happened Tuesday", "upcoming deadlines")
+4. **Decay Heap** — importance scores that degrade over time, like human memory
+5. **Key-Value Store** — fast facts, session state, scoring weights
 
-### Memory Types
-
-Inspired by cognitive science (Tulving's taxonomy):
+### Memory Types (Tulving's Taxonomy)
 
 | Type | What it stores | Example |
 |------|---------------|---------|
-| **Episodic** | Events, experiences with context | "User had a rough day at work on Feb 20" |
-| **Semantic** | Facts, knowledge, abstractions | "User is a software engineer who likes AI" |
-| **Procedural** | Strategies, behaviors, what worked | "User prefers concise answers with code examples" |
-| **Emotional** | Valence weighting on memories | "Dog's death → high emotional weight → never forget" |
+| **Semantic** | Facts, knowledge | "User is a software engineer at Meta" |
+| **Episodic** | Events with context | "Had a rough day at work on Feb 20" |
+| **Procedural** | Strategies, what worked | "Deploy with blue-green, not rolling update" |
 
-### Core Operations
+All memories carry **importance**, **valence** (emotional tone), **domain**, **source**, **certainty**, and **timestamps** — used in a multi-signal scoring function that goes far beyond cosine similarity.
 
-```
-yantrikdb.record(memory, importance=0.8, emotion="frustrated")
-yantrikdb.recall("What does the user feel about their job?")
-yantrikdb.relate("user.job", "user.stress", strength=0.7)
-yantrikdb.consolidate(topic="user.career", since="30d")
-yantrikdb.decay(threshold=0.1)       // prune low-importance memories
-yantrikdb.forget(memory_id)          // explicit removal
-yantrikdb.conflict(memory_a, memory_b)  // flag contradiction
-yantrikdb.resolve(conflict_id, resolution)  // user-driven resolution
+## Key Capabilities
 
-// Session tracking — memories auto-link to the active session
-yantrikdb.session_start(namespace, client_id)
-yantrikdb.session_end(session_id)    // computes summary, topics, valence
+### Relevance-Conditioned Scoring
 
-// Temporal awareness
-yantrikdb.stale(days=14)             // forgotten high-importance memories
-yantrikdb.upcoming(days=7)           // memories with approaching deadlines
-yantrikdb.entity_profile("Alice")    // valence, domains, frequency, trend
-```
+Not just vector similarity. Every recall combines:
 
-## Conflict Resolution — Human-in-the-Loop
+- **Semantic similarity** (HNSW) — what's topically related
+- **Temporal decay** — recent memories score higher
+- **Importance weighting** — critical decisions beat trivia
+- **Graph proximity** — entity relationships boost connected memories
+- **Retrieval feedback** — learns from past recall quality
 
-When synced devices produce contradictory memories, YantrikDB doesn't guess. It creates a **conflict segment** — a first-class data structure:
+Weights are tuned automatically from usage patterns.
+
+### Conflict Detection & Resolution
+
+When memories contradict, YantrikDB doesn't guess — it creates a conflict segment:
 
 ```
-┌──────────────────────────────────────────┐
-│            Conflict Segment              │
-│                                          │
-│  conflict_id:  c_0042                    │
-│  type:         identity_fact             │
-│  priority:     high                      │
-│  memory_a:     "works at Google" (phone) │
-│  memory_b:     "works at Meta" (laptop)  │
-│  status:       pending_resolution        │
-│  strategy:     ask_user                  │
-│  resolved_by:  null                      │
-│  resolution:   null                      │
-└──────────────────────────────────────────┘
+"works at Google" (recorded Jan 15) vs. "works at Meta" (recorded Mar 1)
+→ Conflict: identity_fact, priority: high, strategy: ask_user
 ```
 
-Resolution happens **conversationally**, not programmatically:
+Resolution is conversational: the AI asks naturally, not programmatically.
 
-> "Oh by the way — last month you mentioned something about Meta. Did you end up switching from Google?"
+### Semantic Consolidation
 
-Conflicts are triaged by priority:
+After many conversations, memories pile up. `think()` runs:
 
-| Conflict Type | Action |
-|---------------|--------|
-| Critical identity facts | Ask immediately |
-| Preferences that changed | Ask naturally in conversation |
-| Minor contradictions | Keep both, resolve lazily |
-| Temporal conflicts | Prefer most recent, flag if uncertain |
+1. **Consolidation** — merge similar memories, extract patterns
+2. **Conflict scan** — find contradictions across the knowledge base
+3. **Pattern mining** — cross-domain discovery ("work stress correlates with health entries")
+4. **Trigger evaluation** — proactive insights worth surfacing
 
-## Multi-Device Sync Protocol
+### Proactive Triggers
 
-YantrikDB is **local-first** with CRDT-based replication:
+The engine generates triggers when it detects something worth reaching out about:
 
-```
-┌──────────────────────┐       ┌──────────────────────┐
-│   Device A (Phone)   │       │  Device B (Laptop)   │
-│                      │       │                      │
-│  ┌────────────────┐  │ sync  │  ┌────────────────┐  │
-│  │ YantrikDB Engine │◄─┼───────┼─►│ YantrikDB Engine │  │
-│  └────────────────┘  │       │  └────────────────┘  │
-│  ┌────────────────┐  │       │  ┌────────────────┐  │
-│  │ Replication    │  │       │  │ Replication    │  │
-│  │ Log            │  │       │  │ Log            │  │
-│  └────────────────┘  │       │  └────────────────┘  │
-└──────────────────────┘       └──────────────────────┘
-         │                              │
-         └──────────┬───────────────────┘
-                    │
-            P2P / Relay / BLE
-        (encrypted, zero-knowledge)
-```
+- Memory conflicts needing resolution
+- Approaching deadlines (temporal awareness)
+- Patterns detected across domains
+- High-importance memories about to decay
+- Goal tracking ("how's the marathon training?")
 
-- **Append-only replication log** — every write, consolidation, and decay event is logged
-- **CRDT merging** — graph edges/nodes and facts merge without conflicts
+Every trigger is grounded in real memory data — not engagement farming.
+
+### Multi-Device Sync (CRDT)
+
+Local-first with append-only replication log:
+
+- **CRDT merging** — graph edges, memories, and metadata merge without conflicts
 - **Vector indexes rebuild locally** — raw memories sync, each device rebuilds HNSW
 - **Forget propagation** — tombstones ensure forgotten memories stay forgotten
-- **Optional cloud relay** — dumb encrypted pipe, not a server. Sees nothing.
+- **Conflict detection** — contradictions across devices are flagged for resolution
 
-### Storage Tiers
+### Sessions & Temporal Awareness
 
-| Tier | Backing | Use case |
-|------|---------|----------|
-| **Hot** | In-memory | Recent/frequent memories, active conversation |
-| **Warm** | SSD-backed | Medium-term, weeks to months |
-| **Cold** | Compressed archival | Old memories, on-demand hydration |
+```python
+sid = db.session_start("default", "claude-code")
+db.record("decided to use PostgreSQL")  # auto-linked to session
+db.record("Alice suggested Redis for caching")
+db.session_end(sid)
+# → computes: memory_count, avg_valence, topics, duration
 
-## Proactive Cognition Loop
-
-YantrikDB runs a **background processing loop** even between conversations — giving AI genuine reasons to reach out:
-
-```
-┌─────────────────────────────────────────────────┐
-│           Proactive Trigger System               │
-│                                                  │
-│  Memory Conflicts    → "You mentioned two        │
-│  (need resolution)     different moving dates"   │
-│                                                  │
-│  Pattern Detection   → "You seem stressed        │
-│  (noticed something)   every Sunday evening"     │
-│                                                  │
-│  Temporal Triggers   → "Your mom's birthday      │
-│  (time-based)          is tomorrow"              │
-│                                                  │
-│  Decay Warnings      → "I'm fuzzy on your        │
-│  (about to forget)     new coworker's name"      │
-│                                                  │
-│  Goal Tracking       → "How's the marathon       │
-│  (user set a goal)     training going?"          │
-│                                                  │
-│  Consolidation       → "I noticed you always     │
-│  Insights              feel better after talking  │
-│                        to your sister"            │
-└─────────────────────────────────────────────────┘
+db.stale(days=14)    # high-importance memories not accessed recently
+db.upcoming(days=7)  # memories with approaching deadlines
 ```
 
-Every proactive message is **grounded in real memory data** — not engagement farming.
+## Full API
 
-Built-in safety constraints:
-
-| Rule | Purpose |
-|------|---------|
-| Cooldown periods | No messaging every hour |
-| Priority threshold | Only reach out when it matters |
-| Time-of-day awareness | Don't message at 3am |
-| User-controlled frequency | "Check in weekly" vs "only urgent" |
-| Groundedness requirement | Every message must trace to real memories |
-
-### Background Processing Cycle
-
-1. **Consolidation pass** — compress, summarize, abstract
-2. **Conflict detection** — find contradictions across synced devices
-3. **Pattern mining** — "user tends to X when Y"
-4. **Cross-domain discovery** — find surprising connections between work, health, hobbies
-5. **Entity bridge detection** — identify people/concepts that span multiple domains
-6. **Trigger evaluation** — "is anything worth reaching out about?"
-7. **Decay pass** — age out low-importance memories
-8. **Session cleanup** — abandon stale sessions, compute summaries
-
-## Session Tracking & Temporal Awareness
-
-YantrikDB tracks conversation sessions as first-class engine primitives — not faked via metadata:
-
-```
-┌────────────────────────────────────────────────┐
-│              Session Lifecycle                  │
-│                                                │
-│  session_start("default", "mcp-server")        │
-│       ↓                                        │
-│  record() → auto-linked to active session      │
-│  record() → auto-linked to active session      │
-│  record() → auto-linked to active session      │
-│       ↓                                        │
-│  session_end() → computes:                     │
-│    • memory_count, avg_valence                 │
-│    • topic extraction from entity graph        │
-│    • duration                                  │
-└────────────────────────────────────────────────┘
-```
-
-**Temporal helpers** give the engine time awareness:
-
-- **`stale(days)`** — high-importance memories not accessed in N days ("I'm forgetting something important")
-- **`upcoming(days)`** — memories with deadlines approaching ("Your dentist appointment is Thursday")
-- **`entity_profile(entity, days)`** — rich profile: valence trend, domain distribution, session count, interaction frequency, dominant emotion
-
-**Cross-domain pattern mining** uses the HNSW vector index to find surprising connections between domains:
-
-- A work frustration pattern that correlates with health domain entries
-- An entity (person, concept) that bridges finance and family domains
-- Scored by `similarity × domain_surprise × entity_support` — common co-occurrences are penalized
+| Operation | Methods |
+|-----------|---------|
+| **Core** | `record`, `record_batch`, `recall`, `recall_with_response`, `recall_refine`, `forget`, `correct` |
+| **Knowledge Graph** | `relate`, `get_edges`, `search_entities`, `entity_profile`, `relationship_depth`, `link_memory_entity` |
+| **Cognition** | `think`, `get_patterns`, `scan_conflicts`, `resolve_conflict`, `derive_personality` |
+| **Triggers** | `get_pending_triggers`, `acknowledge_trigger`, `deliver_trigger`, `act_on_trigger`, `dismiss_trigger` |
+| **Sessions** | `session_start`, `session_end`, `session_history`, `active_session`, `session_abandon_stale` |
+| **Temporal** | `stale`, `upcoming` |
+| **Procedural** | `record_procedural`, `surface_procedural`, `reinforce_procedural` |
+| **Lifecycle** | `archive`, `hydrate`, `decay`, `evict`, `list_memories`, `stats` |
+| **Sync** | `extract_ops_since`, `apply_ops`, `get_peer_watermark`, `set_peer_watermark` |
+| **Maintenance** | `rebuild_vec_index`, `rebuild_graph_index`, `learned_weights` |
 
 ## Technical Decisions
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| **Architecture** | Embedded (like SQLite) | No server overhead, sub-ms local reads, single-tenant |
-| **Core language** | Rust | Memory safety without GC pauses, ideal for embedded engines |
-| **Bindings** | Python, TypeScript | Agent/AI layer integration |
-| **Storage format** | Single file per user | Portable, backupable, no infrastructure |
+| **Core language** | Rust | Memory safety, no GC, ideal for embedded engines |
+| **Architecture** | Embedded (like SQLite) | No server overhead, sub-ms reads, single-tenant |
+| **Bindings** | Python (PyO3), TypeScript | Agent/AI layer integration |
+| **Storage** | Single file per user | Portable, backupable, no infrastructure |
 | **Sync** | CRDTs + append-only log | Conflict-free for most operations, deterministic |
+| **Thread safety** | Mutex/RwLock, Send+Sync | Safe concurrent access from multiple threads |
 | **Query interface** | Cognitive operations API | Not SQL — designed for how agents think |
-| **Sessions** | Engine-native tracking | Auto-links memories, computes valence/topics per session |
-| **Cross-domain mining** | HNSW-based | Uses existing vector index for O(k·n) instead of O(n²) pairwise |
 
-## Target Use Cases
+## Ecosystem
 
-- **AI Companions** — persistent, evolving relationships across devices
-- **Autonomous Agents** — long-horizon planning with memory consolidation
-- **Multi-Agent Systems** — shared memory between cooperating agents
-- **Personal AI Assistants** — that actually remember and grow with you
+| Package | What | Install |
+|---------|------|---------|
+| [yantrikdb](https://crates.io/crates/yantrikdb) | Rust engine | `cargo add yantrikdb` |
+| [yantrikdb](https://pypi.org/project/yantrikdb/) | Python bindings (PyO3) | `pip install yantrikdb` |
+| [yantrikdb-mcp](https://pypi.org/project/yantrikdb-mcp/) | MCP server for AI agents | `pip install yantrikdb-mcp` |
 
 ## Roadmap
 
-- [x] **V0** — Single device, embedded engine, core memory model (record, recall, relate, consolidate, decay)
-- [x] **V1** — Replication log, sync between two devices
-- [x] **V2** — Conflict resolution with human-in-the-loop, production-grade sync
+- [x] **V0** — Embedded engine, core memory model (record, recall, relate, consolidate, decay)
+- [x] **V1** — Replication log, CRDT-based sync between devices
+- [x] **V2** — Conflict resolution with human-in-the-loop
 - [x] **V3** — Proactive cognition loop, pattern detection, trigger system
 - [x] **V4** — Sessions, temporal awareness, cross-domain pattern mining, entity profiles
 - [ ] **V5** — Multi-agent shared memory, federated learning across users
@@ -298,23 +258,13 @@ YantrikDB tracks conversation sessions as first-class engine primitives — not 
 
 - **U.S. Patent Application 19/573,392** (March 2026): "Cognitive Memory Database System with Relevance-Conditioned Scoring and Autonomous Knowledge Management"
 - **Zenodo:** [YantrikDB: A Cognitive Memory Engine for Persistent AI Systems](https://zenodo.org/records/14933693)
-- **Related work by the author:** ["Convert Once, Consume Many: SDF for Cacheable, Typed Semantic Extraction from Web Pages"](https://zenodo.org/records/18559223) — solving efficient data ingestion for AI agents (the upstream problem to memory)
 
 ## Author
 
-**Pranab Sarkar**
-- ORCID: [0009-0009-8683-1481](https://orcid.org/0009-0009-8683-1481)
-- LinkedIn: [pranab-sarkar-b0511160](https://www.linkedin.com/in/pranab-sarkar-b0511160/)
-- Email: developer@pranab.co.in
-
-## Patent
-
-YantrikDB's cognitive memory methods are covered by U.S. Patent Application No. 19/573,392 (filed March 20, 2026), claiming priority to Provisional Application No. 63/991,357 (filed February 26, 2026).
+**Pranab Sarkar** — [ORCID](https://orcid.org/0009-0009-8683-1481) · [LinkedIn](https://www.linkedin.com/in/pranab-sarkar-b0511160/) · developer@pranab.co.in
 
 ## License
 
-Copyright (c) 2026 Pranab Sarkar
+AGPL-3.0. See [LICENSE](LICENSE) for the full text.
 
-This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public License as published by the Free Software Foundation, version 3.
-
-See [LICENSE](LICENSE) for the full text.
+The [MCP server](https://github.com/yantrikos/yantrikdb-mcp) is MIT-licensed — using the engine via the MCP server does not trigger AGPL obligations on your code.
