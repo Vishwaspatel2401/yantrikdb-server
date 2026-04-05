@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 #[serde(default)]
 pub struct ServerConfig {
     pub server: ServerSection,
+    pub tls: TlsSection,
     pub embedding: EmbeddingSection,
     pub background: BackgroundSection,
     pub limits: LimitsSection,
@@ -23,6 +24,28 @@ pub struct ServerSection {
 pub struct EmbeddingSection {
     pub strategy: EmbeddingStrategy,
     pub dim: usize,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct TlsSection {
+    pub cert_path: Option<PathBuf>,
+    pub key_path: Option<PathBuf>,
+}
+
+impl Default for TlsSection {
+    fn default() -> Self {
+        Self {
+            cert_path: None,
+            key_path: None,
+        }
+    }
+}
+
+impl TlsSection {
+    pub fn is_enabled(&self) -> bool {
+        self.cert_path.is_some() && self.key_path.is_some()
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -50,6 +73,7 @@ impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             server: ServerSection::default(),
+            tls: TlsSection::default(),
             embedding: EmbeddingSection::default(),
             background: BackgroundSection::default(),
             limits: LimitsSection::default(),

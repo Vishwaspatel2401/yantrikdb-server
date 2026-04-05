@@ -15,6 +15,7 @@ use yantrikdb_protocol::*;
 use yantrikdb_protocol::messages::*;
 
 use crate::auth;
+use crate::background::WorkerRegistry;
 use crate::command::{Command, RememberInput};
 use crate::control::ControlDb;
 use crate::handler::{self, CommandResult};
@@ -23,23 +24,39 @@ use crate::tenant_pool::TenantPool;
 pub struct AppState {
     pub control: Mutex<ControlDb>,
     pub pool: TenantPool,
+    pub workers: WorkerRegistry,
 }
 
 pub async fn run_wire_server(
     listener: TcpListener,
     state: Arc<AppState>,
+    tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
 ) -> anyhow::Result<()> {
+    let tls_mode = tls_acceptor.is_some();
     tracing::info!(
         addr = %listener.local_addr()?,
+        tls = tls_mode,
         "wire protocol server listening"
     );
 
     loop {
         let (stream, addr) = listener.accept().await?;
         let state = Arc::clone(&state);
+        let tls = tls_acceptor.clone();
         tokio::spawn(async move {
             tracing::debug!(%addr, "new connection");
-            if let Err(e) = handle_connection(stream, state).await {
+            let result = if let Some(acceptor) = tls {
+                match acceptor.accept(stream).await {
+                    Ok(tls_stream) => handle_connection_tls(tls_stream, state).await,
+                    Err(e) => {
+                        tracing::warn!(%addr, error = %e, "TLS handshake failed");
+                        return;
+                    }
+                }
+            } else {
+                handle_connection(stream, state).await
+            };
+            if let Err(e) = result {
                 tracing::error!(%addr, error = %e, "connection error");
             }
             tracing::debug!(%addr, "connection closed");
@@ -47,10 +64,27 @@ pub async fn run_wire_server(
     }
 }
 
+async fn handle_connection_tls(
+    stream: tokio_rustls::server::TlsStream<tokio::net::TcpStream>,
+    state: Arc<AppState>,
+) -> anyhow::Result<()> {
+    handle_connection_inner(stream, state).await
+}
+
 async fn handle_connection(
     stream: tokio::net::TcpStream,
     state: Arc<AppState>,
 ) -> anyhow::Result<()> {
+    handle_connection_inner(stream, state).await
+}
+
+async fn handle_connection_inner<S>(
+    stream: S,
+    state: Arc<AppState>,
+) -> anyhow::Result<()>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
     let mut framed = Framed::new(stream, YantrikCodec::new());
 
     // Phase 1: Authenticate
@@ -66,6 +100,9 @@ async fn handle_connection(
     let db_record = state.control.lock().unwrap().get_database_by_id(db_id)?
         .ok_or_else(|| anyhow::anyhow!("database not found"))?;
     let engine = state.pool.get_engine(&db_record)?;
+
+    // Start background workers if not already running
+    state.workers.start_for_database(db_id, db_record.name.clone(), Arc::clone(&engine));
 
     // Phase 2: Command loop
     while let Some(result) = framed.next().await {
@@ -98,10 +135,13 @@ async fn handle_connection(
     Ok(())
 }
 
-async fn authenticate(
-    framed: &mut Framed<tokio::net::TcpStream, YantrikCodec>,
+async fn authenticate<S>(
+    framed: &mut Framed<S, YantrikCodec>,
     state: &AppState,
-) -> anyhow::Result<(i64, String)> {
+) -> anyhow::Result<(i64, String)>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
     // Wait for AUTH frame
     let frame = framed.next().await
         .ok_or_else(|| anyhow::anyhow!("connection closed before auth"))??;

@@ -1,4 +1,5 @@
 mod auth;
+mod background;
 mod command;
 mod config;
 mod control;
@@ -7,6 +8,7 @@ mod handler;
 mod http_gateway;
 mod server;
 mod tenant_pool;
+mod tls;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -54,6 +56,22 @@ enum Commands {
     Token {
         #[command(subcommand)]
         action: TokenAction,
+        /// Data directory
+        #[arg(long, default_value = "./data")]
+        data_dir: PathBuf,
+    },
+    /// Export a database to JSONL (stdout)
+    Export {
+        /// Database name
+        name: String,
+        /// Data directory
+        #[arg(long, default_value = "./data")]
+        data_dir: PathBuf,
+    },
+    /// Import a database from JSONL (stdin)
+    Import {
+        /// Database name
+        name: String,
         /// Data directory
         #[arg(long, default_value = "./data")]
         data_dir: PathBuf,
@@ -166,6 +184,172 @@ async fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
+
+        Commands::Export { name, data_dir } => {
+            let control = ControlDb::open(&data_dir.join("control.db"))?;
+            let db_record = control.get_database(&name)?
+                .ok_or_else(|| anyhow::anyhow!("database '{}' not found", name))?;
+
+            let db_dir = data_dir.join(&db_record.path);
+            let db_path = db_dir.join("yantrik.db");
+            let engine = yantrikdb::YantrikDB::new(
+                db_path.to_str().unwrap_or("yantrik.db"),
+                384,
+            )?;
+
+            // Export memories in pages
+            let page_size = 1000;
+            let mut offset = 0;
+            let mut total = 0;
+            loop {
+                let (memories, count) = engine.list_memories(
+                    page_size, offset, None, None, None, "created_at",
+                )?;
+                if memories.is_empty() {
+                    break;
+                }
+                for mem in &memories {
+                    let row = serde_json::json!({
+                        "type": "memory",
+                        "rid": mem.rid,
+                        "text": mem.text,
+                        "memory_type": mem.memory_type,
+                        "importance": mem.importance,
+                        "valence": mem.valence,
+                        "half_life": mem.half_life,
+                        "created_at": mem.created_at,
+                        "metadata": mem.metadata,
+                        "namespace": mem.namespace,
+                        "certainty": mem.certainty,
+                        "domain": mem.domain,
+                        "source": mem.source,
+                        "emotional_state": mem.emotional_state,
+                    });
+                    println!("{}", serde_json::to_string(&row)?);
+                    total += 1;
+                }
+                offset += page_size;
+                if memories.len() < page_size || offset >= count {
+                    break;
+                }
+            }
+
+            // Export graph edges — get all entities and their edges
+            let entities = engine.search_entities(None, None, 100_000)?;
+            let mut edge_count = 0;
+            let mut seen_edges = std::collections::HashSet::new();
+            for entity in &entities {
+                let edges = engine.get_edges(&entity.name)?;
+                for edge in &edges {
+                    if seen_edges.insert(edge.edge_id.clone()) {
+                        let row = serde_json::json!({
+                            "type": "edge",
+                            "edge_id": edge.edge_id,
+                            "src": edge.src,
+                            "dst": edge.dst,
+                            "rel_type": edge.rel_type,
+                            "weight": edge.weight,
+                        });
+                        println!("{}", serde_json::to_string(&row)?);
+                        edge_count += 1;
+                    }
+                }
+            }
+
+            eprintln!("exported {} memories, {} edges from '{}'", total, edge_count, name);
+            Ok(())
+        }
+
+        Commands::Import { name, data_dir } => {
+            std::fs::create_dir_all(&data_dir)?;
+            let control = ControlDb::open(&data_dir.join("control.db"))?;
+
+            // Create database if it doesn't exist
+            if !control.database_exists(&name)? {
+                let db_dir = data_dir.join(&name);
+                std::fs::create_dir_all(&db_dir)?;
+                control.create_database(&name, &name)?;
+                eprintln!("created database '{}'", name);
+            }
+
+            let db_record = control.get_database(&name)?
+                .ok_or_else(|| anyhow::anyhow!("database '{}' not found", name))?;
+
+            let db_dir = data_dir.join(&db_record.path);
+            std::fs::create_dir_all(&db_dir)?;
+            let db_path = db_dir.join("yantrik.db");
+            let mut engine = yantrikdb::YantrikDB::new(
+                db_path.to_str().unwrap_or("yantrik.db"),
+                384,
+            )?;
+
+            // Set up embedder for re-embedding
+            let embedder = embedder::FastEmbedder::new()?;
+            engine.set_embedder(embedder.boxed());
+
+            let stdin = std::io::BufReader::new(std::io::stdin());
+            use std::io::BufRead;
+            let mut mem_count = 0;
+            let mut edge_count = 0;
+            let mut errors = 0;
+
+            for line in stdin.lines() {
+                let line = line?;
+                if line.is_empty() {
+                    continue;
+                }
+                let row: serde_json::Value = serde_json::from_str(&line)?;
+                let row_type = row["type"].as_str().unwrap_or("");
+
+                match row_type {
+                    "memory" => {
+                        let result = engine.record_text(
+                            row["text"].as_str().unwrap_or(""),
+                            row["memory_type"].as_str().unwrap_or("semantic"),
+                            row["importance"].as_f64().unwrap_or(0.5),
+                            row["valence"].as_f64().unwrap_or(0.0),
+                            row["half_life"].as_f64().unwrap_or(168.0),
+                            &row["metadata"],
+                            row["namespace"].as_str().unwrap_or(""),
+                            row["certainty"].as_f64().unwrap_or(1.0),
+                            row["domain"].as_str().unwrap_or(""),
+                            row["source"].as_str().unwrap_or("user"),
+                            row["emotional_state"].as_str(),
+                        );
+                        match result {
+                            Ok(_) => mem_count += 1,
+                            Err(e) => {
+                                eprintln!("error importing memory: {}", e);
+                                errors += 1;
+                            }
+                        }
+                    }
+                    "edge" => {
+                        let result = engine.relate(
+                            row["src"].as_str().unwrap_or(""),
+                            row["dst"].as_str().unwrap_or(""),
+                            row["rel_type"].as_str().unwrap_or(""),
+                            row["weight"].as_f64().unwrap_or(1.0),
+                        );
+                        match result {
+                            Ok(_) => edge_count += 1,
+                            Err(e) => {
+                                eprintln!("error importing edge: {}", e);
+                                errors += 1;
+                            }
+                        }
+                    }
+                    _ => {
+                        eprintln!("unknown row type: {}", row_type);
+                        errors += 1;
+                    }
+                }
+            }
+
+            eprintln!("imported {} memories, {} edges into '{}' ({} errors)",
+                mem_count, edge_count, name, errors);
+            Ok(())
+        }
     }
 }
 
@@ -190,10 +374,20 @@ async fn run_server(cfg: ServerConfig) -> anyhow::Result<()> {
         }
     };
 
-    // Create tenant pool
+    // Create tenant pool and background worker registry
     let pool = TenantPool::new(&cfg, embedder);
+    let workers = background::WorkerRegistry::new(&cfg.background);
 
-    let state = Arc::new(AppState { control: Mutex::new(control), pool });
+    let state = Arc::new(AppState { control: Mutex::new(control), pool, workers });
+
+    // Build TLS acceptor if configured
+    let tls_acceptor = if cfg.tls.is_enabled() {
+        let acceptor = tls::build_tls_acceptor(&cfg.tls)?;
+        tracing::info!("TLS enabled");
+        Some(acceptor)
+    } else {
+        None
+    };
 
     // Start wire protocol server
     let wire_addr = format!("0.0.0.0:{}", cfg.server.wire_port);
@@ -206,22 +400,39 @@ async fn run_server(cfg: ServerConfig) -> anyhow::Result<()> {
     tracing::info!(
         wire_port = cfg.server.wire_port,
         http_port = cfg.server.http_port,
+        tls = cfg.tls.is_enabled(),
         data_dir = %cfg.server.data_dir.display(),
         "YantrikDB server starting"
     );
 
     let wire_state = Arc::clone(&state);
     let http_state = Arc::clone(&state);
+    let shutdown_state = Arc::clone(&state);
 
-    // Run both servers concurrently
+    // Run both servers concurrently, shutdown on ctrl-c
     tokio::select! {
-        result = server::run_wire_server(wire_listener, wire_state) => {
+        result = server::run_wire_server(wire_listener, wire_state, tls_acceptor) => {
             result?;
         }
-        result = axum::serve(http_listener, http_gateway::router(http_state)) => {
+        result = axum::serve(http_listener, http_gateway::router(http_state))
+            .with_graceful_shutdown(shutdown_signal()) => {
             result?;
+        }
+        _ = shutdown_signal() => {
+            tracing::info!("shutdown signal received");
         }
     }
 
+    // Graceful shutdown
+    tracing::info!("stopping background workers...");
+    shutdown_state.workers.stop_all();
+    tracing::info!("YantrikDB server stopped");
+
     Ok(())
+}
+
+async fn shutdown_signal() {
+    tokio::signal::ctrl_c()
+        .await
+        .expect("failed to install ctrl+c handler");
 }

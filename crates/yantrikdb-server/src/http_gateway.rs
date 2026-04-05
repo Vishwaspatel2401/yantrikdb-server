@@ -47,6 +47,9 @@ fn resolve_engine(
     let engine = state.pool.get_engine(&db_record)
         .map_err(|e| app_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
+    // Start background workers if not already running
+    state.workers.start_for_database(db_id, db_record.name.clone(), std::sync::Arc::clone(&engine));
+
     Ok((db_id, engine))
 }
 
