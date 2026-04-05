@@ -57,3 +57,8 @@ anyhow = "1"
 thiserror = "2"
 uuid7 = "1"
 bytes = "1"
+
+[dev-dependencies]
+reqwest = { version = "0.12", features = ["json"] }
+tempfile = "3"
+tokio-test = "0.4"
