@@ -2,7 +2,7 @@
 
 A cognitive memory database server with native wire protocol, HTTP gateway, built-in embeddings, automatic failover, and Raft-lite replication.
 
-> **Status**: v0.3.0 — production-grade replication, ready for homelab/enterprise deployment.
+> **Status**: v0.3.1 — production-grade replication, multi-node failover, three binaries.
 
 ## What it is
 
@@ -60,7 +60,8 @@ yantrikdb> \q
 
 ## Cluster setup (3 nodes with auto failover)
 
-For your homelab — works great with 2 full nodes + 1 tiny witness.
+Works great with 2 full nodes + 1 tiny witness on any infrastructure
+(bare metal, VMs, containers, cloud).
 
 ### Architecture
 
@@ -420,4 +421,4 @@ cargo test -p yantrikdb-server --test cluster_integration -- --ignored --nocaptu
 
 ## Credits
 
-Built by Pranab Sarkar with a sidekick. Phase 1, 2, and 3 all shipped on the same day in April 2026.
+Built on top of [yantrikdb-core](https://github.com/yantrikos/yantrikdb) — the cognitive memory engine.
