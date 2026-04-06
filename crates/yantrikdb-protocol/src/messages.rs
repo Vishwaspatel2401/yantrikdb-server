@@ -471,7 +471,7 @@ pub struct OplogPushOkResponse {
 }
 
 /// Heartbeat from leader to followers.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HeartbeatMsg {
     pub term: u64,
     pub leader_id: u32,
@@ -490,7 +490,7 @@ pub struct HeartbeatAckMsg {
 }
 
 /// Vote request from a candidate during election.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RequestVoteMsg {
     pub term: u64,
     pub candidate_id: u32,

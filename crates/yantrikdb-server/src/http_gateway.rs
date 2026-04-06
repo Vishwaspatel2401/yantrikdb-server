@@ -79,10 +79,39 @@ fn execute_cmd(
 // ── Route handlers ──────────────────────────────────────────────
 
 async fn health(State(state): State<Arc<AppState>>) -> Json<Value> {
-    Json(json!({
+    let mut payload = json!({
         "status": "ok",
         "engines_loaded": state.pool.loaded_count(),
-    }))
+    });
+    if let Some(ref cluster) = state.cluster {
+        payload["cluster"] = json!({
+            "node_id": cluster.node_id(),
+            "role": format!("{:?}", cluster.state.leader_role()),
+            "term": cluster.state.current_term(),
+            "leader": cluster.state.current_leader(),
+            "accepts_writes": cluster.state.accepts_writes(),
+            "healthy": cluster.is_healthy(),
+        });
+    }
+    Json(payload)
+}
+
+/// Reject if cluster is enabled and this node doesn't accept writes.
+fn check_writable(state: &AppState) -> Result<(), (StatusCode, Json<Value>)> {
+    if let Some(ref cluster) = state.cluster {
+        if !cluster.state.accepts_writes() {
+            let leader = cluster.state.current_leader();
+            let msg = match leader {
+                Some(id) => format!("read-only: not the leader (current leader: node {})", id),
+                None => "read-only: no leader elected".into(),
+            };
+            return Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({"error": msg, "leader": leader})),
+            ));
+        }
+    }
+    Ok(())
 }
 
 async fn remember(
@@ -90,6 +119,7 @@ async fn remember(
     headers: axum::http::HeaderMap,
     Json(body): Json<Value>,
 ) -> AppResult {
+    check_writable(&state)?;
     let (_, engine) = resolve_engine(
         &state,
         headers.get("authorization").and_then(|v| v.to_str().ok()),
@@ -203,6 +233,7 @@ async fn forget(
     headers: axum::http::HeaderMap,
     Json(body): Json<Value>,
 ) -> AppResult {
+    check_writable(&state)?;
     let (_, engine) = resolve_engine(
         &state,
         headers.get("authorization").and_then(|v| v.to_str().ok()),
@@ -219,6 +250,7 @@ async fn relate(
     headers: axum::http::HeaderMap,
     Json(body): Json<Value>,
 ) -> AppResult {
+    check_writable(&state)?;
     let (_, engine) = resolve_engine(
         &state,
         headers.get("authorization").and_then(|v| v.to_str().ok()),
@@ -246,6 +278,7 @@ async fn think(
     headers: axum::http::HeaderMap,
     Json(body): Json<Value>,
 ) -> AppResult {
+    check_writable(&state)?;
     let (_, engine) = resolve_engine(
         &state,
         headers.get("authorization").and_then(|v| v.to_str().ok()),
@@ -298,6 +331,7 @@ async fn resolve_conflict(
     AxumPath(conflict_id): AxumPath<String>,
     Json(body): Json<Value>,
 ) -> AppResult {
+    check_writable(&state)?;
     let (_, engine) = resolve_engine(
         &state,
         headers.get("authorization").and_then(|v| v.to_str().ok()),
@@ -329,6 +363,7 @@ async fn session_start(
     headers: axum::http::HeaderMap,
     Json(body): Json<Value>,
 ) -> AppResult {
+    check_writable(&state)?;
     let (_, engine) = resolve_engine(
         &state,
         headers.get("authorization").and_then(|v| v.to_str().ok()),
@@ -355,6 +390,7 @@ async fn session_end(
     AxumPath(session_id): AxumPath<String>,
     body: Option<Json<Value>>,
 ) -> AppResult {
+    check_writable(&state)?;
     let (_, engine) = resolve_engine(
         &state,
         headers.get("authorization").and_then(|v| v.to_str().ok()),
@@ -392,6 +428,7 @@ async fn create_database(
     headers: axum::http::HeaderMap,
     Json(body): Json<Value>,
 ) -> AppResult {
+    check_writable(&state)?;
     // For now, any valid token can create databases
     let _ = resolve_engine(
         &state,
@@ -428,6 +465,45 @@ async fn create_database(
         "id": id,
         "message": format!("database '{}' created", name),
     })))
+}
+
+async fn cluster_status(State(state): State<Arc<AppState>>) -> Json<Value> {
+    let Some(ref ctx) = state.cluster else {
+        return Json(json!({
+            "clustered": false,
+            "message": "single-node mode (no replication)"
+        }));
+    };
+
+    let peers: Vec<Value> = ctx
+        .peers
+        .snapshot()
+        .into_iter()
+        .map(|p| {
+            json!({
+                "node_id": p.node_id,
+                "addr": p.addr,
+                "role": format!("{:?}", p.configured_role).to_lowercase(),
+                "reachable": p.reachable,
+                "current_term": p.current_term,
+                "last_seen_secs_ago": p.last_seen.map(|t| t.elapsed().as_secs_f64()),
+            })
+        })
+        .collect();
+
+    Json(json!({
+        "clustered": true,
+        "node_id": ctx.node_id(),
+        "role": format!("{:?}", ctx.state.leader_role()),
+        "configured_role": format!("{:?}", ctx.state.configured_role).to_lowercase(),
+        "current_term": ctx.state.current_term(),
+        "leader_id": ctx.state.current_leader(),
+        "voted_for": ctx.state.voted_for(),
+        "accepts_writes": ctx.state.accepts_writes(),
+        "healthy": ctx.is_healthy(),
+        "quorum_size": ctx.quorum_size(),
+        "peers": peers,
+    }))
 }
 
 async fn list_databases(
@@ -468,5 +544,6 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/stats", get(stats))
         .route("/v1/databases", post(create_database))
         .route("/v1/databases", get(list_databases))
+        .route("/v1/cluster", get(cluster_status))
         .with_state(state)
 }

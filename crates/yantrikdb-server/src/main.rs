@@ -393,13 +393,40 @@ async fn run_server(cfg: ServerConfig) -> anyhow::Result<()> {
     };
 
     // Create tenant pool and background worker registry
-    let pool = TenantPool::new(&cfg, embedder);
+    let pool = Arc::new(TenantPool::new(&cfg, embedder));
     let workers = background::WorkerRegistry::new(&cfg.background);
+
+    // Initialize cluster context if clustering is enabled
+    let cluster_ctx = if cfg.cluster.is_clustered() {
+        let raft_path = cfg.server.data_dir.join("raft.json");
+        let node_state = Arc::new(cluster::NodeState::new(
+            cfg.cluster.node_id,
+            cfg.cluster.role,
+            raft_path,
+        )?);
+        let peer_registry = Arc::new(cluster::PeerRegistry::new(&cfg.cluster.peers));
+        let ctx = Arc::new(cluster::ClusterContext::new(
+            cfg.cluster.clone(),
+            node_state,
+            peer_registry,
+            Arc::clone(&pool),
+        ));
+        tracing::info!(
+            node_id = cfg.cluster.node_id,
+            role = ?cfg.cluster.role,
+            peers = cfg.cluster.peers.len(),
+            "cluster mode enabled"
+        );
+        Some(ctx)
+    } else {
+        None
+    };
 
     let state = Arc::new(AppState {
         control: Mutex::new(control),
         pool,
         workers,
+        cluster: cluster_ctx.clone(),
     });
 
     // Build TLS acceptor if configured
@@ -431,6 +458,42 @@ async fn run_server(cfg: ServerConfig) -> anyhow::Result<()> {
     let http_state = Arc::clone(&state);
     let shutdown_state = Arc::clone(&state);
 
+    // Cancellation token for cluster background tasks
+    let cluster_cancel = tokio_util::sync::CancellationToken::new();
+
+    // Spawn cluster server + background loops if clustered
+    let mut cluster_handles = Vec::new();
+    if let Some(ref ctx) = cluster_ctx {
+        let cluster_addr = format!("0.0.0.0:{}", cfg.cluster.cluster_port);
+        let cluster_listener = tokio::net::TcpListener::bind(&cluster_addr).await?;
+        tracing::info!(
+            cluster_port = cfg.cluster.cluster_port,
+            "cluster wire server starting"
+        );
+
+        // Cluster server (peer-to-peer)
+        let ctx_clone = Arc::clone(ctx);
+        cluster_handles.push(tokio::spawn(async move {
+            if let Err(e) = cluster::server::run_cluster_server(cluster_listener, ctx_clone).await {
+                tracing::error!(error = %e, "cluster server crashed");
+            }
+        }));
+
+        // Heartbeat loop (leader sends heartbeats, followers monitor)
+        let ctx_clone = Arc::clone(ctx);
+        let cancel_clone = cluster_cancel.clone();
+        cluster_handles.push(tokio::spawn(async move {
+            cluster::heartbeat::run_heartbeat_loop(ctx_clone, cancel_clone).await;
+        }));
+
+        // Oplog sync loop (followers/replicas pull from leader)
+        let ctx_clone = Arc::clone(ctx);
+        let cancel_clone = cluster_cancel.clone();
+        cluster_handles.push(tokio::spawn(async move {
+            cluster::sync_loop::run_sync_loop(ctx_clone, cancel_clone).await;
+        }));
+    }
+
     // Run both servers concurrently, shutdown on ctrl-c
     tokio::select! {
         result = server::run_wire_server(wire_listener, wire_state, tls_acceptor) => {
@@ -443,6 +506,12 @@ async fn run_server(cfg: ServerConfig) -> anyhow::Result<()> {
         _ = shutdown_signal() => {
             tracing::info!("shutdown signal received");
         }
+    }
+
+    // Stop cluster background tasks
+    cluster_cancel.cancel();
+    for h in cluster_handles {
+        let _ = h.await;
     }
 
     // Graceful shutdown

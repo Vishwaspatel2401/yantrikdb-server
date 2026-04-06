@@ -82,8 +82,12 @@ pub struct ClusterSection {
     /// Role for this node in the cluster.
     pub role: NodeRole,
 
-    /// Address other peers should use to reach this node (host:port).
-    /// If unset, derived from server.wire_port + hostname.
+    /// Port for inter-peer cluster traffic (separate from client wire port).
+    /// Defaults to 7440.
+    pub cluster_port: u16,
+
+    /// Address other peers should use to reach this node (host:cluster_port).
+    /// If unset, derived from cluster_port + hostname.
     pub advertise_addr: Option<String>,
 
     /// List of peer nodes in the cluster.
@@ -139,6 +143,7 @@ impl Default for ClusterSection {
         Self {
             node_id: 0,
             role: NodeRole::Single,
+            cluster_port: 7440,
             advertise_addr: None,
             peers: Vec::new(),
             heartbeat_interval_ms: 1000,

@@ -4,6 +4,7 @@ members = [
     "crates/yantrikdb-core",
     "crates/yantrikdb-protocol",
     "crates/yantrikdb-server",
+    "crates/yantrikdb-witness",
     "crates/yantrikdb-python",
     "crates/yql",
 ]

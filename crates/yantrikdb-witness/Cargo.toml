@@ -1,0 +1,33 @@
+[package]
+name = "yantrikdb-witness"
+version = "0.1.0"
+edition = "2021"
+description = "YantrikDB cluster witness — vote-only daemon for 2-node failover"
+license = "AGPL-3.0"
+
+[[bin]]
+name = "yantrikdb-witness"
+path = "src/main.rs"
+
+[dependencies]
+yantrikdb-protocol = { path = "../yantrikdb-protocol" }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+futures = "0.3"
+
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# Data
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Misc
+anyhow = "1"
+bytes = "1"

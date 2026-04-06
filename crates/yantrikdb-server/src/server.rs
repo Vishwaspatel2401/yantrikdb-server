@@ -23,8 +23,10 @@ use crate::tenant_pool::TenantPool;
 
 pub struct AppState {
     pub control: Mutex<ControlDb>,
-    pub pool: TenantPool,
+    pub pool: Arc<TenantPool>,
     pub workers: WorkerRegistry,
+    /// Optional cluster context — None when running in single-node mode.
+    pub cluster: Option<Arc<crate::cluster::ClusterContext>>,
 }
 
 pub async fn run_wire_server(
@@ -121,6 +123,20 @@ where
 
         match frame_to_command(&frame) {
             Ok(cmd) => {
+                // Reject writes on non-leader nodes in clustered mode
+                if let Some(ref cluster) = state.cluster {
+                    if is_write_command(&cmd) && !cluster.state.accepts_writes() {
+                        let leader = cluster.state.current_leader();
+                        let msg = match leader {
+                            Some(id) => format!("not the leader (current leader: node {})", id),
+                            None => "no leader elected (cluster not ready)".into(),
+                        };
+                        let err = make_error(stream_id, error_codes::READONLY_NODE, msg)?;
+                        framed.send(err).await?;
+                        continue;
+                    }
+                }
+
                 let response_frames = execute_and_respond(cmd, &engine, &state.control, stream_id);
                 for f in response_frames {
                     framed.send(f).await?;
@@ -195,6 +211,22 @@ where
             Err(e)
         }
     }
+}
+
+/// Whether a command modifies state (must be rejected on read-only nodes).
+fn is_write_command(cmd: &Command) -> bool {
+    matches!(
+        cmd,
+        Command::Remember { .. }
+            | Command::RememberBatch { .. }
+            | Command::Forget { .. }
+            | Command::Relate { .. }
+            | Command::SessionStart { .. }
+            | Command::SessionEnd { .. }
+            | Command::Think { .. }
+            | Command::Resolve { .. }
+            | Command::CreateDb { .. }
+    )
 }
 
 fn frame_to_command(frame: &Frame) -> anyhow::Result<Command> {
