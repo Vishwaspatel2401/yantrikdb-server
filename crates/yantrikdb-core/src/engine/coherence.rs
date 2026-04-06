@@ -6,8 +6,8 @@
 
 use crate::attention::AttentionConfig;
 use crate::coherence::{
-    check_coherence, plan_enforcement, CoherenceConfig, CoherenceHistory,
-    CoherenceInputs, CoherenceReport, EnforcementReport,
+    check_coherence, plan_enforcement, CoherenceConfig, CoherenceHistory, CoherenceInputs,
+    CoherenceReport, EnforcementReport,
 };
 use crate::contradiction::ContradictionConfig;
 use crate::error::Result;
@@ -30,9 +30,9 @@ impl YantrikDB {
     pub fn load_coherence_config(&self) -> Result<CoherenceConfig> {
         match Self::get_meta(&self.conn(), COHERENCE_CONFIG_META_KEY)? {
             Some(json) => serde_json::from_str(&json).map_err(|e| {
-                crate::error::YantrikDbError::Database(
-                    rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
-                )
+                crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
+                    Box::new(e),
+                ))
             }),
             None => Ok(CoherenceConfig::default()),
         }
@@ -41,9 +41,9 @@ impl YantrikDB {
     /// Persist the coherence config.
     pub fn save_coherence_config(&self, config: &CoherenceConfig) -> Result<()> {
         let json = serde_json::to_string(config).map_err(|e| {
-            crate::error::YantrikDbError::Database(
-                rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
-            )
+            crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
+                Box::new(e),
+            ))
         })?;
         self.conn().execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
@@ -56,9 +56,9 @@ impl YantrikDB {
     pub fn load_coherence_history(&self) -> Result<CoherenceHistory> {
         match Self::get_meta(&self.conn(), COHERENCE_HISTORY_META_KEY)? {
             Some(json) => serde_json::from_str(&json).map_err(|e| {
-                crate::error::YantrikDbError::Database(
-                    rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
-                )
+                crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
+                    Box::new(e),
+                ))
             }),
             None => Ok(CoherenceHistory::new(DEFAULT_MAX_SNAPSHOTS)),
         }
@@ -67,9 +67,9 @@ impl YantrikDB {
     /// Persist the coherence history.
     pub fn save_coherence_history(&self, history: &CoherenceHistory) -> Result<()> {
         let json = serde_json::to_string(history).map_err(|e| {
-            crate::error::YantrikDbError::Database(
-                rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
-            )
+            crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
+                Box::new(e),
+            ))
         })?;
         self.conn().execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
@@ -85,10 +85,7 @@ impl YantrikDB {
     /// Hydrates the working set, loads relevant edges and belief
     /// contradictions, then delegates to the pure coherence checker.
     /// The result is recorded in the coherence history.
-    pub fn check_coherence(
-        &self,
-        attention_config: &AttentionConfig,
-    ) -> Result<CoherenceReport> {
+    pub fn check_coherence(&self, attention_config: &AttentionConfig) -> Result<CoherenceReport> {
         let config = self.load_coherence_config()?;
         let ws = self.hydrate_working_set(attention_config.clone())?;
         let edges = self.load_coherence_edges()?;
@@ -229,9 +226,9 @@ pub struct CoherenceStats {
 
 #[cfg(test)]
 mod tests {
-    use crate::engine::YantrikDB;
     use crate::attention::AttentionConfig;
     use crate::coherence::{CoherenceConfig, CoherenceHistory};
+    use crate::engine::YantrikDB;
 
     fn test_db() -> YantrikDB {
         YantrikDB::new(":memory:", 8).unwrap()

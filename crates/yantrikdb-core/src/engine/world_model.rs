@@ -5,8 +5,8 @@
 
 use crate::error::Result;
 use crate::world_model::{
-    summarize_world_model, ActionKind, ActionOutcome, StateFeatures,
-    TransitionModel, WorldModelSummary,
+    summarize_world_model, ActionKind, ActionOutcome, StateFeatures, TransitionModel,
+    WorldModelSummary,
 };
 
 use super::{now, YantrikDB};
@@ -22,9 +22,9 @@ impl YantrikDB {
         match Self::get_meta(&self.conn(), TRANSITION_MODEL_META_KEY)? {
             Some(json) => {
                 let mut model: TransitionModel = serde_json::from_str(&json).map_err(|e| {
-                    crate::error::YantrikDbError::Database(
-                        rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
-                    )
+                    crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
+                        Box::new(e),
+                    ))
                 })?;
                 model.rebuild_index();
                 Ok(model)
@@ -36,9 +36,9 @@ impl YantrikDB {
     /// Persist the transition model.
     pub fn save_transition_model(&self, model: &TransitionModel) -> Result<()> {
         let json = serde_json::to_string(model).map_err(|e| {
-            crate::error::YantrikDbError::Database(
-                rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
-            )
+            crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
+                Box::new(e),
+            ))
         })?;
         self.conn().execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
@@ -62,11 +62,7 @@ impl YantrikDB {
     }
 
     /// Predict the outcome of an action in a given state.
-    pub fn predict_outcome(
-        &self,
-        features: &StateFeatures,
-        action: ActionKind,
-    ) -> Result<f64> {
+    pub fn predict_outcome(&self, features: &StateFeatures, action: ActionKind) -> Result<f64> {
         let model = self.load_transition_model()?;
         Ok(model.expected_success(features, action))
     }
@@ -119,7 +115,9 @@ mod tests {
         db.record_transition(noon(), ActionKind::ExecuteTool, ActionOutcome::Failed)
             .unwrap();
 
-        let success = db.predict_outcome(&noon(), ActionKind::ExecuteTool).unwrap();
+        let success = db
+            .predict_outcome(&noon(), ActionKind::ExecuteTool)
+            .unwrap();
         assert!(success > 0.4, "Expected success > 0.4, got {:.3}", success);
     }
 

@@ -203,6 +203,89 @@ async fn remember(
     execute_cmd(&engine, cmd, &state.control)
 }
 
+async fn remember_batch(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<Value>,
+) -> AppResult {
+    check_writable(&state)?;
+    let (_, engine) = resolve_engine(
+        &state,
+        headers.get("authorization").and_then(|v| v.to_str().ok()),
+    )?;
+
+    let memories_arr = body
+        .get("memories")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| app_error(StatusCode::BAD_REQUEST, "missing 'memories' array"))?;
+
+    if memories_arr.is_empty() {
+        return Ok(Json(json!({"rids": [], "count": 0})));
+    }
+    if memories_arr.len() > 10_000 {
+        return Err(app_error(
+            StatusCode::BAD_REQUEST,
+            "batch size exceeds 10000",
+        ));
+    }
+
+    let mut memories = Vec::with_capacity(memories_arr.len());
+    for (i, m) in memories_arr.iter().enumerate() {
+        let text = m
+            .get("text")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                app_error(
+                    StatusCode::BAD_REQUEST,
+                    format!("memories[{}]: missing 'text'", i),
+                )
+            })?
+            .to_string();
+        memories.push(crate::command::RememberInput {
+            text,
+            memory_type: m
+                .get("memory_type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("semantic")
+                .into(),
+            importance: m.get("importance").and_then(|v| v.as_f64()).unwrap_or(0.5),
+            valence: m.get("valence").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            half_life: m.get("half_life").and_then(|v| v.as_f64()).unwrap_or(168.0),
+            metadata: m.get("metadata").cloned().unwrap_or(json!({})),
+            namespace: m
+                .get("namespace")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .into(),
+            certainty: m.get("certainty").and_then(|v| v.as_f64()).unwrap_or(1.0),
+            domain: m
+                .get("domain")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .into(),
+            source: m
+                .get("source")
+                .and_then(|v| v.as_str())
+                .unwrap_or("user")
+                .into(),
+            emotional_state: m
+                .get("emotional_state")
+                .and_then(|v| v.as_str())
+                .map(String::from),
+            embedding: m.get("embedding").and_then(|v| {
+                v.as_array().map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_f64().map(|f| f as f32))
+                        .collect()
+                })
+            }),
+        });
+    }
+
+    let cmd = Command::RememberBatch { memories };
+    execute_cmd(&engine, cmd, &state.control)
+}
+
 async fn recall(
     State(state): State<Arc<AppState>>,
     headers: axum::http::HeaderMap,
@@ -707,6 +790,7 @@ pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/v1/health", get(health))
         .route("/v1/remember", post(remember))
+        .route("/v1/remember/batch", post(remember_batch))
         .route("/v1/recall", post(recall))
         .route("/v1/forget", post(forget))
         .route("/v1/relate", post(relate))

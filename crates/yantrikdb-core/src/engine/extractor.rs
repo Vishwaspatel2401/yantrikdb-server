@@ -23,9 +23,9 @@ impl YantrikDB {
     pub fn load_template_store(&self) -> Result<TemplateStore> {
         match Self::get_meta(&self.conn(), TEMPLATE_STORE_META_KEY)? {
             Some(json) => serde_json::from_str(&json).map_err(|e| {
-                crate::error::YantrikDbError::Database(
-                    rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
-                )
+                crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
+                    Box::new(e),
+                ))
             }),
             None => Ok(TemplateStore::new()),
         }
@@ -34,9 +34,9 @@ impl YantrikDB {
     /// Persist the extraction template store.
     pub fn save_template_store(&self, store: &TemplateStore) -> Result<()> {
         let json = serde_json::to_string(store).map_err(|e| {
-            crate::error::YantrikDbError::Database(
-                rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
-            )
+            crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
+                Box::new(e),
+            ))
         })?;
         self.conn().execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
@@ -49,9 +49,9 @@ impl YantrikDB {
     pub fn load_extractor_config(&self) -> Result<ExtractorConfig> {
         match Self::get_meta(&self.conn(), EXTRACTOR_CONFIG_META_KEY)? {
             Some(json) => serde_json::from_str(&json).map_err(|e| {
-                crate::error::YantrikDbError::Database(
-                    rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
-                )
+                crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
+                    Box::new(e),
+                ))
             }),
             None => Ok(ExtractorConfig::default()),
         }
@@ -60,9 +60,9 @@ impl YantrikDB {
     /// Persist the extractor configuration.
     pub fn save_extractor_config(&self, config: &ExtractorConfig) -> Result<()> {
         let json = serde_json::to_string(config).map_err(|e| {
-            crate::error::YantrikDbError::Database(
-                rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
-            )
+            crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
+                Box::new(e),
+            ))
         })?;
         self.conn().execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
@@ -150,9 +150,7 @@ impl YantrikDB {
 #[cfg(test)]
 mod tests {
     use crate::engine::YantrikDB;
-    use crate::extractor::{
-        ExtractionContext, ExtractorTier, SerializableOpTemplate, UpdateOp,
-    };
+    use crate::extractor::{ExtractionContext, ExtractorTier, SerializableOpTemplate, UpdateOp};
     use crate::state::Priority;
 
     fn test_db() -> YantrikDB {
@@ -197,7 +195,9 @@ mod tests {
 
         db.teach_extraction_template(
             "deploy the app to staging environment",
-            SerializableOpTemplate::CreateTask { priority: Priority::High },
+            SerializableOpTemplate::CreateTask {
+                priority: Priority::High,
+            },
         )
         .unwrap();
 
@@ -222,7 +222,9 @@ mod tests {
 
         db.teach_extraction_template(
             "test template text",
-            SerializableOpTemplate::CreateTask { priority: Priority::Medium },
+            SerializableOpTemplate::CreateTask {
+                priority: Priority::Medium,
+            },
         )
         .unwrap();
 
@@ -253,7 +255,10 @@ mod tests {
             .extract_cognitive_updates("Remind me to take my medication at 8pm", &context)
             .unwrap();
 
-        assert!(!response.escalation_needed, "High-confidence match should not escalate");
+        assert!(
+            !response.escalation_needed,
+            "High-confidence match should not escalate"
+        );
         match &response.updates[0].op {
             UpdateOp::CreateTask { priority, .. } => {
                 assert_eq!(*priority, Priority::High);

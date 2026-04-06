@@ -22,9 +22,9 @@ impl YantrikDB {
     pub fn load_belief_store(&self) -> Result<BeliefStore> {
         match Self::get_meta(&self.conn(), BELIEF_STORE_META_KEY)? {
             Some(json) => serde_json::from_str(&json).map_err(|e| {
-                crate::error::YantrikDbError::Database(
-                    rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
-                )
+                crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
+                    Box::new(e),
+                ))
             }),
             None => Ok(BeliefStore::new()),
         }
@@ -33,9 +33,9 @@ impl YantrikDB {
     /// Persist the autonomous belief store.
     pub fn save_belief_store(&self, store: &BeliefStore) -> Result<()> {
         let json = serde_json::to_string(store).map_err(|e| {
-            crate::error::YantrikDbError::Database(
-                rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
-            )
+            crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
+                Box::new(e),
+            ))
         })?;
         self.conn().execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
@@ -48,9 +48,9 @@ impl YantrikDB {
     pub fn load_flywheel_config(&self) -> Result<FlywheelConfig> {
         match Self::get_meta(&self.conn(), FLYWHEEL_CONFIG_META_KEY)? {
             Some(json) => serde_json::from_str(&json).map_err(|e| {
-                crate::error::YantrikDbError::Database(
-                    rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
-                )
+                crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
+                    Box::new(e),
+                ))
             }),
             None => Ok(FlywheelConfig::default()),
         }
@@ -59,9 +59,9 @@ impl YantrikDB {
     /// Persist the flywheel configuration.
     pub fn save_flywheel_config(&self, config: &FlywheelConfig) -> Result<()> {
         let json = serde_json::to_string(config).map_err(|e| {
-            crate::error::YantrikDbError::Database(
-                rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
-            )
+            crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
+                Box::new(e),
+            ))
         })?;
         self.conn().execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
@@ -147,9 +147,7 @@ impl YantrikDB {
     }
 
     /// Get a count of autonomous beliefs by stage.
-    pub fn belief_store_stats(
-        &self,
-    ) -> Result<(usize, usize, usize)> {
+    pub fn belief_store_stats(&self) -> Result<(usize, usize, usize)> {
         let store = self.load_belief_store()?;
         let established = store.established().len();
         let candidates = store.candidates().len();

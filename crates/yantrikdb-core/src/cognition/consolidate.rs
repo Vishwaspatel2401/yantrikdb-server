@@ -5,9 +5,21 @@ use crate::types::*;
 
 /// Compute cosine similarity between two vectors.
 pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f64 {
-    let dot: f64 = a.iter().zip(b.iter()).map(|(&x, &y)| x as f64 * y as f64).sum();
-    let norm_a: f64 = a.iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>().sqrt();
-    let norm_b: f64 = b.iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>().sqrt();
+    let dot: f64 = a
+        .iter()
+        .zip(b.iter())
+        .map(|(&x, &y)| x as f64 * y as f64)
+        .sum();
+    let norm_a: f64 = a
+        .iter()
+        .map(|&x| (x as f64) * (x as f64))
+        .sum::<f64>()
+        .sqrt();
+    let norm_b: f64 = b
+        .iter()
+        .map(|&x| (x as f64) * (x as f64))
+        .sum::<f64>()
+        .sqrt();
     if norm_a == 0.0 || norm_b == 0.0 {
         return 0.0;
     }
@@ -148,7 +160,19 @@ pub fn find_consolidation_candidates(
     );
     let mut stmt = conn.prepare(&sql)?;
 
-    let raw_rows: Vec<(String, String, String, Vec<u8>, f64, f64, f64, f64, f64, String, String)> = stmt
+    let raw_rows: Vec<(
+        String,
+        String,
+        String,
+        Vec<u8>,
+        f64,
+        f64,
+        f64,
+        f64,
+        f64,
+        String,
+        String,
+    )> = stmt
         .query_map([], |row| {
             Ok((
                 row.get::<_, String>("rid")?,
@@ -167,27 +191,51 @@ pub fn find_consolidation_candidates(
         .collect::<std::result::Result<Vec<_>, _>>()?;
 
     // Decrypt text, embedding, and metadata if encrypted
-    let memories: Vec<MemoryWithEmbedding> = raw_rows.into_iter()
-        .map(|(rid, memory_type, stored_text, stored_emb, created_at, importance, valence, half_life, last_access, stored_meta, namespace)| {
-            let text = db.decrypt_text(&stored_text)?;
-            let meta_str = db.decrypt_text(&stored_meta)?;
-            let emb_blob = db.decrypt_embedding(&stored_emb)?;
-            Ok(MemoryWithEmbedding {
-                rid, memory_type, text,
-                embedding: deserialize_f32(&emb_blob),
-                created_at, importance, valence, half_life, last_access,
-                metadata: serde_json::from_str(&meta_str)
-                    .unwrap_or(serde_json::Value::Object(Default::default())),
+    let memories: Vec<MemoryWithEmbedding> = raw_rows
+        .into_iter()
+        .map(
+            |(
+                rid,
+                memory_type,
+                stored_text,
+                stored_emb,
+                created_at,
+                importance,
+                valence,
+                half_life,
+                last_access,
+                stored_meta,
                 namespace,
-            })
-        })
+            )| {
+                let text = db.decrypt_text(&stored_text)?;
+                let meta_str = db.decrypt_text(&stored_meta)?;
+                let emb_blob = db.decrypt_embedding(&stored_emb)?;
+                Ok(MemoryWithEmbedding {
+                    rid,
+                    memory_type,
+                    text,
+                    embedding: deserialize_f32(&emb_blob),
+                    created_at,
+                    importance,
+                    valence,
+                    half_life,
+                    last_access,
+                    metadata: serde_json::from_str(&meta_str)
+                        .unwrap_or(serde_json::Value::Object(Default::default())),
+                    namespace,
+                })
+            },
+        )
         .collect::<Result<Vec<_>>>()?;
 
     // Group memories by namespace to prevent cross-namespace consolidation
     let mut by_namespace: std::collections::HashMap<String, Vec<MemoryWithEmbedding>> =
         std::collections::HashMap::new();
     for mem in memories {
-        by_namespace.entry(mem.namespace.clone()).or_default().push(mem);
+        by_namespace
+            .entry(mem.namespace.clone())
+            .or_default()
+            .push(mem);
     }
 
     let mut result: Vec<Vec<MemoryWithEmbedding>> = Vec::new();
@@ -200,7 +248,12 @@ pub fn find_consolidation_candidates(
             10,
         );
         for indices in cluster_indices {
-            result.push(indices.into_iter().map(|i| ns_memories[i].clone()).collect());
+            result.push(
+                indices
+                    .into_iter()
+                    .map(|i| ns_memories[i].clone())
+                    .collect(),
+            );
         }
     }
 
@@ -216,7 +269,13 @@ pub fn consolidate(
     limit: usize,
     dry_run: bool,
 ) -> Result<Vec<serde_json::Value>> {
-    let clusters = find_consolidation_candidates(db, sim_threshold, time_window_days, min_cluster_size, limit)?;
+    let clusters = find_consolidation_candidates(
+        db,
+        sim_threshold,
+        time_window_days,
+        min_cluster_size,
+        limit,
+    )?;
 
     if dry_run {
         return Ok(clusters
@@ -245,10 +304,7 @@ pub fn consolidate(
         let mean_emb = mean_embedding(cluster);
 
         // 3. Aggregate importance
-        let max_importance = cluster
-            .iter()
-            .map(|m| m.importance)
-            .fold(0.0f64, f64::max);
+        let max_importance = cluster.iter().map(|m| m.importance).fold(0.0f64, f64::max);
         let consolidated_importance = (max_importance * 1.1).min(1.0);
 
         // Mean valence
@@ -256,10 +312,7 @@ pub fn consolidate(
             cluster.iter().map(|m| m.valence).sum::<f64>() / cluster.len() as f64;
 
         // Longer half-life for consolidated memories
-        let max_half_life = cluster
-            .iter()
-            .map(|m| m.half_life)
-            .fold(0.0f64, f64::max);
+        let max_half_life = cluster.iter().map(|m| m.half_life).fold(0.0f64, f64::max);
         let consolidated_half_life = max_half_life * 1.5;
 
         // 4. Record the new consolidated memory
@@ -269,7 +322,10 @@ pub fn consolidate(
             "consolidation_time": ts,
         });
 
-        let cluster_namespace = cluster.first().map(|m| m.namespace.as_str()).unwrap_or("default");
+        let cluster_namespace = cluster
+            .first()
+            .map(|m| m.namespace.as_str())
+            .unwrap_or("default");
         let consolidated_rid = db.record(
             &summary_text,
             "semantic",
@@ -365,7 +421,13 @@ pub fn consolidate(
 mod tests {
     use super::*;
 
-    fn make_mem(rid: &str, text: &str, embedding: Vec<f32>, created_at: f64, importance: f64) -> MemoryWithEmbedding {
+    fn make_mem(
+        rid: &str,
+        text: &str,
+        embedding: Vec<f32>,
+        created_at: f64,
+        importance: f64,
+    ) -> MemoryWithEmbedding {
         MemoryWithEmbedding {
             rid: rid.to_string(),
             memory_type: "episodic".to_string(),

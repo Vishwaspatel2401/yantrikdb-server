@@ -5,8 +5,8 @@
 
 use crate::error::Result;
 use crate::receptivity::{
-    ActivityState, ContextSnapshot, NotificationMode, ReceptivityEstimate,
-    ReceptivityModel, SuggestionOutcome,
+    ActivityState, ContextSnapshot, NotificationMode, ReceptivityEstimate, ReceptivityModel,
+    SuggestionOutcome,
 };
 
 use super::{now, YantrikDB};
@@ -21,9 +21,9 @@ impl YantrikDB {
     pub fn load_receptivity_model(&self) -> Result<ReceptivityModel> {
         match Self::get_meta(&self.conn(), RECEPTIVITY_META_KEY)? {
             Some(json) => serde_json::from_str(&json).map_err(|e| {
-                crate::error::YantrikDbError::Database(
-                    rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
-                )
+                crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
+                    Box::new(e),
+                ))
             }),
             None => Ok(ReceptivityModel::new()),
         }
@@ -32,9 +32,9 @@ impl YantrikDB {
     /// Persist the receptivity model to the database.
     pub fn save_receptivity_model(&self, model: &ReceptivityModel) -> Result<()> {
         let json = serde_json::to_string(model).map_err(|e| {
-            crate::error::YantrikDbError::Database(
-                rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
-            )
+            crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
+                Box::new(e),
+            ))
         })?;
         self.conn().execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
@@ -46,10 +46,7 @@ impl YantrikDB {
     // ── Estimation ──
 
     /// Estimate current user receptivity given a context snapshot.
-    pub fn estimate_receptivity(
-        &self,
-        context: &ContextSnapshot,
-    ) -> Result<ReceptivityEstimate> {
+    pub fn estimate_receptivity(&self, context: &ContextSnapshot) -> Result<ReceptivityEstimate> {
         let model = self.load_receptivity_model()?;
         Ok(model.estimate(context))
     }
@@ -57,10 +54,7 @@ impl YantrikDB {
     /// Quick check: is the user likely receptive right now?
     ///
     /// Uses default threshold of 0.5.
-    pub fn is_user_receptive(
-        &self,
-        context: &ContextSnapshot,
-    ) -> Result<bool> {
+    pub fn is_user_receptive(&self, context: &ContextSnapshot) -> Result<bool> {
         let estimate = self.estimate_receptivity(context)?;
         Ok(estimate.is_receptive(0.5))
     }
@@ -72,10 +66,7 @@ impl YantrikDB {
     }
 
     /// Get remaining attention budget for a session.
-    pub fn attention_budget_remaining(
-        &self,
-        suggestions_used: u32,
-    ) -> Result<u32> {
+    pub fn attention_budget_remaining(&self, suggestions_used: u32) -> Result<u32> {
         let model = self.load_receptivity_model()?;
         Ok(model.attention_budget.remaining(suggestions_used))
     }
@@ -187,7 +178,8 @@ mod tests {
         assert!(
             est_after >= est_before - 0.1, // Should stay same or increase
             "Score should not decrease much after accepts: {} -> {}",
-            est_before, est_after
+            est_before,
+            est_after
         );
     }
 

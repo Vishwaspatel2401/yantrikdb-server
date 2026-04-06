@@ -9,50 +9,67 @@ impl YantrikDB {
     /// Get engine statistics. Optionally filter memory counts by namespace.
     pub fn stats(&self, namespace: Option<&str>) -> Result<Stats> {
         let conn = self.conn.lock().unwrap();
-        let ns_filter = namespace.map(|ns| format!(" AND namespace = '{}'", ns.replace('\'', "''"))).unwrap_or_default();
+        let ns_filter = namespace
+            .map(|ns| format!(" AND namespace = '{}'", ns.replace('\'', "''")))
+            .unwrap_or_default();
         let active = conn.query_row(
-            &format!("SELECT COUNT(*) FROM memories WHERE consolidation_status = 'active'{}", ns_filter),
-            [], |row| row.get(0),
+            &format!(
+                "SELECT COUNT(*) FROM memories WHERE consolidation_status = 'active'{}",
+                ns_filter
+            ),
+            [],
+            |row| row.get(0),
         )?;
         let consolidated = conn.query_row(
-            &format!("SELECT COUNT(*) FROM memories WHERE consolidation_status = 'consolidated'{}", ns_filter),
-            [], |row| row.get(0),
+            &format!(
+                "SELECT COUNT(*) FROM memories WHERE consolidation_status = 'consolidated'{}",
+                ns_filter
+            ),
+            [],
+            |row| row.get(0),
         )?;
         let tombstoned = conn.query_row(
-            &format!("SELECT COUNT(*) FROM memories WHERE consolidation_status = 'tombstoned'{}", ns_filter),
-            [], |row| row.get(0),
+            &format!(
+                "SELECT COUNT(*) FROM memories WHERE consolidation_status = 'tombstoned'{}",
+                ns_filter
+            ),
+            [],
+            |row| row.get(0),
         )?;
         let archived = conn.query_row(
-            &format!("SELECT COUNT(*) FROM memories WHERE storage_tier = 'cold'{}", ns_filter),
-            [], |row| row.get(0),
+            &format!(
+                "SELECT COUNT(*) FROM memories WHERE storage_tier = 'cold'{}",
+                ns_filter
+            ),
+            [],
+            |row| row.get(0),
         )?;
         let edges = conn.query_row(
             "SELECT COUNT(*) FROM edges WHERE tombstoned = 0",
-            [], |row| row.get(0),
+            [],
+            |row| row.get(0),
         )?;
-        let entities = conn.query_row(
-            "SELECT COUNT(*) FROM entities",
-            [], |row| row.get(0),
-        )?;
-        let operations = conn.query_row(
-            "SELECT COUNT(*) FROM oplog",
-            [], |row| row.get(0),
-        )?;
+        let entities = conn.query_row("SELECT COUNT(*) FROM entities", [], |row| row.get(0))?;
+        let operations = conn.query_row("SELECT COUNT(*) FROM oplog", [], |row| row.get(0))?;
         let open_conflicts = conn.query_row(
             "SELECT COUNT(*) FROM conflicts WHERE status = 'open'",
-            [], |row| row.get(0),
+            [],
+            |row| row.get(0),
         )?;
         let resolved_conflicts = conn.query_row(
             "SELECT COUNT(*) FROM conflicts WHERE status IN ('resolved', 'dismissed')",
-            [], |row| row.get(0),
+            [],
+            |row| row.get(0),
         )?;
         let pending_triggers = conn.query_row(
             "SELECT COUNT(*) FROM trigger_log WHERE status = 'pending'",
-            [], |row| row.get(0),
+            [],
+            |row| row.get(0),
         )?;
         let active_patterns = conn.query_row(
             "SELECT COUNT(*) FROM patterns WHERE status = 'active'",
-            [], |row| row.get(0),
+            [],
+            |row| row.get(0),
         )?;
         drop(conn);
 

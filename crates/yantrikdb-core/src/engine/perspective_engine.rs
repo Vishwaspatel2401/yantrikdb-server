@@ -4,16 +4,14 @@
 //! perspective store and stack, and exposing context-dependent
 //! salience/weight resolution.
 
-use crate::perspective::{
-    PerspectiveId, PerspectiveStore, PerspectiveStack, Perspective,
-    PerspectiveTransition, PerspectiveConflict, ActivationContext,
-    CognitiveStyle,
-    activate_perspective, deactivate_perspective, resolve_salience,
-    resolve_edge_weight, resolve_cognitive_style, detect_perspective_shift,
-    perspective_conflict_check, create_preset,
-};
 use crate::error::Result;
-use crate::state::{NodeId, NodeKind, CognitiveEdgeKind};
+use crate::perspective::{
+    activate_perspective, create_preset, deactivate_perspective, detect_perspective_shift,
+    perspective_conflict_check, resolve_cognitive_style, resolve_edge_weight, resolve_salience,
+    ActivationContext, CognitiveStyle, Perspective, PerspectiveConflict, PerspectiveId,
+    PerspectiveStack, PerspectiveStore, PerspectiveTransition,
+};
+use crate::state::{CognitiveEdgeKind, NodeId, NodeKind};
 
 use super::YantrikDB;
 
@@ -27,9 +25,9 @@ impl YantrikDB {
     pub fn load_perspective_store(&self) -> Result<PerspectiveStore> {
         match Self::get_meta(&self.conn(), PERSPECTIVE_STORE_META_KEY)? {
             Some(json) => serde_json::from_str(&json).map_err(|e| {
-                crate::error::YantrikDbError::Database(
-                    rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
-                )
+                crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
+                    Box::new(e),
+                ))
             }),
             None => Ok(PerspectiveStore::new()),
         }
@@ -38,9 +36,9 @@ impl YantrikDB {
     /// Persist the perspective store.
     pub fn save_perspective_store(&self, store: &PerspectiveStore) -> Result<()> {
         let json = serde_json::to_string(store).map_err(|e| {
-            crate::error::YantrikDbError::Database(
-                rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
-            )
+            crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
+                Box::new(e),
+            ))
         })?;
         self.conn().execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
@@ -53,9 +51,9 @@ impl YantrikDB {
     pub fn load_perspective_stack(&self) -> Result<PerspectiveStack> {
         match Self::get_meta(&self.conn(), PERSPECTIVE_STACK_META_KEY)? {
             Some(json) => serde_json::from_str(&json).map_err(|e| {
-                crate::error::YantrikDbError::Database(
-                    rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
-                )
+                crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
+                    Box::new(e),
+                ))
             }),
             None => Ok(PerspectiveStack::new()),
         }
@@ -64,9 +62,9 @@ impl YantrikDB {
     /// Persist the active perspective stack.
     pub fn save_perspective_stack(&self, stack: &PerspectiveStack) -> Result<()> {
         let json = serde_json::to_string(stack).map_err(|e| {
-            crate::error::YantrikDbError::Database(
-                rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
-            )
+            crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
+                Box::new(e),
+            ))
         })?;
         self.conn().execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
@@ -107,7 +105,13 @@ impl YantrikDB {
         let store = self.load_perspective_store()?;
         let stack = self.load_perspective_stack()?;
         Ok(resolve_salience(
-            &stack, node_id, node_kind, node_domain, node_tags, base_salience, &store,
+            &stack,
+            node_id,
+            node_kind,
+            node_domain,
+            node_tags,
+            base_salience,
+            &store,
         ))
     }
 
@@ -207,7 +211,9 @@ mod tests {
     #[test]
     fn test_create_preset_unknown() {
         let db = test_db();
-        let id = db.create_preset_perspective("nonexistent", 1_000_000).unwrap();
+        let id = db
+            .create_preset_perspective("nonexistent", 1_000_000)
+            .unwrap();
         assert!(id.is_none());
     }
 

@@ -5,9 +5,8 @@
 
 use crate::error::Result;
 use crate::narrative::{
-    ArcAlert, ArcId, AutobiographicalTimeline, NarrativeEpisode,
-    NarrativeQuery, NarrativeResult,
-    arc_health_check, assign_to_arc, generate_arc_summary, query_timeline,
+    arc_health_check, assign_to_arc, generate_arc_summary, query_timeline, ArcAlert, ArcId,
+    AutobiographicalTimeline, NarrativeEpisode, NarrativeQuery, NarrativeResult,
 };
 
 use super::YantrikDB;
@@ -21,9 +20,9 @@ impl YantrikDB {
     pub fn load_timeline(&self) -> Result<AutobiographicalTimeline> {
         match Self::get_meta(&self.conn(), TIMELINE_META_KEY)? {
             Some(json) => serde_json::from_str(&json).map_err(|e| {
-                crate::error::YantrikDbError::Database(
-                    rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
-                )
+                crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
+                    Box::new(e),
+                ))
             }),
             None => Ok(AutobiographicalTimeline::default()),
         }
@@ -32,9 +31,9 @@ impl YantrikDB {
     /// Persist the autobiographical timeline.
     pub fn save_timeline(&self, timeline: &AutobiographicalTimeline) -> Result<()> {
         let json = serde_json::to_string(timeline).map_err(|e| {
-            crate::error::YantrikDbError::Database(
-                rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
-            )
+            crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
+                Box::new(e),
+            ))
         })?;
         self.conn().execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
@@ -46,10 +45,7 @@ impl YantrikDB {
     // ── API ──
 
     /// Assign an episode to a narrative arc (or create a new one).
-    pub fn assign_episode_to_arc(
-        &self,
-        episode: &NarrativeEpisode,
-    ) -> Result<ArcId> {
+    pub fn assign_episode_to_arc(&self, episode: &NarrativeEpisode) -> Result<ArcId> {
         let mut timeline = self.load_timeline()?;
         let arc_id = assign_to_arc(episode, &mut timeline);
         self.save_timeline(&timeline)?;
@@ -57,10 +53,7 @@ impl YantrikDB {
     }
 
     /// Query the narrative timeline.
-    pub fn query_narrative(
-        &self,
-        query: &NarrativeQuery,
-    ) -> Result<NarrativeResult> {
+    pub fn query_narrative(&self, query: &NarrativeQuery) -> Result<NarrativeResult> {
         let timeline = self.load_timeline()?;
         Ok(query_timeline(&timeline, query))
     }

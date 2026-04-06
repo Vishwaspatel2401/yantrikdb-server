@@ -5,8 +5,7 @@
 
 use crate::error::Result;
 use crate::hawkes::{
-    AnticipatedEvent, EventPrediction, HawkesRegistry, HawkesRegistryConfig,
-    ModelSummary,
+    AnticipatedEvent, EventPrediction, HawkesRegistry, HawkesRegistryConfig, ModelSummary,
 };
 use crate::state::{NodeKind, NodePayload};
 
@@ -22,9 +21,9 @@ impl YantrikDB {
     pub fn load_hawkes_registry(&self) -> Result<HawkesRegistry> {
         match Self::get_meta(&self.conn(), HAWKES_META_KEY)? {
             Some(json) => serde_json::from_str(&json).map_err(|e| {
-                crate::error::YantrikDbError::Database(
-                    rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
-                )
+                crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
+                    Box::new(e),
+                ))
             }),
             None => Ok(HawkesRegistry::new()),
         }
@@ -33,9 +32,9 @@ impl YantrikDB {
     /// Persist the Hawkes registry to the database.
     pub fn save_hawkes_registry(&self, registry: &HawkesRegistry) -> Result<()> {
         let json = serde_json::to_string(registry).map_err(|e| {
-            crate::error::YantrikDbError::Database(
-                rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
-            )
+            crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
+                Box::new(e),
+            ))
         })?;
         self.conn().execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
@@ -161,7 +160,11 @@ mod tests {
         let registry = db.load_hawkes_registry().unwrap();
         assert_eq!(registry.model_count(), 2);
         assert_eq!(
-            registry.models.get("email_check").unwrap().total_observations,
+            registry
+                .models
+                .get("email_check")
+                .unwrap()
+                .total_observations,
             2
         );
     }

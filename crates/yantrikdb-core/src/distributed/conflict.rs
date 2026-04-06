@@ -12,14 +12,19 @@ use crate::types::{Conflict, ConflictType};
 
 /// Rel types that indicate unique-value identity facts (should not have multiple values).
 const IDENTITY_REL_TYPES: &[&str] = &[
-    "birthday", "age", "lives_in", "works_at", "email", "phone",
-    "full_name", "spouse", "hometown",
+    "birthday",
+    "age",
+    "lives_in",
+    "works_at",
+    "email",
+    "phone",
+    "full_name",
+    "spouse",
+    "hometown",
 ];
 
 /// Rel types that indicate preferences (concurrent differences are suspicious).
-const PREFERENCE_REL_TYPES: &[&str] = &[
-    "prefers", "favorite", "likes", "dislikes",
-];
+const PREFERENCE_REL_TYPES: &[&str] = &["prefers", "favorite", "likes", "dislikes"];
 
 /// Classify a conflict type from the rel_type.
 fn classify_conflict(rel_type: &str) -> ConflictType {
@@ -34,24 +39,47 @@ fn classify_conflict(rel_type: &str) -> ConflictType {
 
 /// Entity types that, when substituted in otherwise-identical sentences, indicate
 /// a factual contradiction (identity-level conflict).
-const IDENTITY_ENTITY_TYPES: &[&str] = &[
-    "organization", "place", "person",
-];
+const IDENTITY_ENTITY_TYPES: &[&str] = &["organization", "place", "person"];
 
 /// Entity types where substitution indicates a preference contradiction.
-const PREFERENCE_ENTITY_TYPES: &[&str] = &[
-    "tech",
-];
+const PREFERENCE_ENTITY_TYPES: &[&str] = &["tech"];
 
 /// Temporal keywords whose presence (when differing) suggests a temporal conflict.
 const TEMPORAL_KEYWORDS: &[&str] = &[
-    "january", "february", "march", "april", "may", "june",
-    "july", "august", "september", "october", "november", "december",
-    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
-    "morning", "afternoon", "evening", "night",
-    "today", "tomorrow", "yesterday",
-    "2024", "2025", "2026", "2027",
-    "q1", "q2", "q3", "q4",
+    "january",
+    "february",
+    "march",
+    "april",
+    "may",
+    "june",
+    "july",
+    "august",
+    "september",
+    "october",
+    "november",
+    "december",
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+    "morning",
+    "afternoon",
+    "evening",
+    "night",
+    "today",
+    "tomorrow",
+    "yesterday",
+    "2024",
+    "2025",
+    "2026",
+    "2027",
+    "q1",
+    "q2",
+    "q3",
+    "q4",
 ];
 
 /// Date-like regex patterns for temporal substitution detection.
@@ -69,8 +97,10 @@ fn is_date_like(token: &str) -> bool {
         return (1..=31).contains(&n);
     }
     // Ordinals: 1st, 2nd, 3rd, 15th, etc.
-    if token.len() >= 3 && token.ends_with("st") || token.ends_with("nd")
-        || token.ends_with("rd") || token.ends_with("th")
+    if token.len() >= 3 && token.ends_with("st")
+        || token.ends_with("nd")
+        || token.ends_with("rd")
+        || token.ends_with("th")
     {
         let num_part = &token[..token.len() - 2];
         if let Ok(n) = num_part.parse::<u32>() {
@@ -82,9 +112,7 @@ fn is_date_like(token: &str) -> bool {
 
 /// Map substitution category names to ConflictType.
 /// Identity-like categories produce IdentityFact; everything else produces Preference.
-const IDENTITY_CATEGORIES: &[&str] = &[
-    "cloud_providers",
-];
+const IDENTITY_CATEGORIES: &[&str] = &["cloud_providers"];
 
 /// Check substitution_members table for category-based conflict.
 fn check_category_substitution(
@@ -102,7 +130,7 @@ fn check_category_substitution(
            AND m1.status = 'active' AND m2.status = 'active'
            AND m1.confidence >= 0.6 AND m2.confidence >= 0.6
            AND c.status = 'active'
-         LIMIT 1"
+         LIMIT 1",
     ) {
         Ok(s) => s,
         Err(_) => return None,
@@ -110,10 +138,11 @@ fn check_category_substitution(
 
     for token_a in diff_a {
         for token_b in diff_b {
-            if let Ok((cat_name, _conflict_mode)) = stmt.query_row(
-                params![token_a.as_str(), token_b.as_str()],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-            ) {
+            if let Ok((cat_name, _conflict_mode)) = stmt
+                .query_row(params![token_a.as_str(), token_b.as_str()], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
+            {
                 let conflict_type = if IDENTITY_CATEGORIES.contains(&cat_name.as_str()) {
                     ConflictType::IdentityFact
                 } else {
@@ -130,12 +159,19 @@ fn check_category_substitution(
 
     // Try multi-word: join all diff tokens and check
     if diff_a.len() >= 2 || diff_b.len() >= 2 {
-        let joined_a: String = diff_a.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(" ");
-        let joined_b: String = diff_b.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(" ");
-        if let Ok((cat_name, _)) = stmt.query_row(
-            params![joined_a, joined_b],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-        ) {
+        let joined_a: String = diff_a
+            .iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let joined_b: String = diff_b
+            .iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        if let Ok((cat_name, _)) = stmt.query_row(params![joined_a, joined_b], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }) {
             let conflict_type = if IDENTITY_CATEGORIES.contains(&cat_name.as_str()) {
                 ConflictType::IdentityFact
             } else {
@@ -166,12 +202,18 @@ fn classify_entity_substitution(
 ) -> (ConflictType, Option<String>) {
     let words_a: std::collections::HashSet<String> = text_a
         .split_whitespace()
-        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase())
+        .map(|w| {
+            w.trim_matches(|c: char| !c.is_alphanumeric())
+                .to_lowercase()
+        })
         .filter(|w| !w.is_empty())
         .collect();
     let words_b: std::collections::HashSet<String> = text_b
         .split_whitespace()
-        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase())
+        .map(|w| {
+            w.trim_matches(|c: char| !c.is_alphanumeric())
+                .to_lowercase()
+        })
         .filter(|w| !w.is_empty())
         .collect();
 
@@ -179,13 +221,25 @@ fn classify_entity_substitution(
     let diff_b: Vec<&String> = words_b.difference(&words_a).collect();
 
     // ── Step 1: Temporal keyword substitution ──
-    let temporal_a = diff_a.iter().any(|w| TEMPORAL_KEYWORDS.contains(&w.as_str()));
-    let temporal_b = diff_b.iter().any(|w| TEMPORAL_KEYWORDS.contains(&w.as_str()));
+    let temporal_a = diff_a
+        .iter()
+        .any(|w| TEMPORAL_KEYWORDS.contains(&w.as_str()));
+    let temporal_b = diff_b
+        .iter()
+        .any(|w| TEMPORAL_KEYWORDS.contains(&w.as_str()));
     if temporal_a && temporal_b {
         let diff_desc = format!(
             "temporal substitution: {{{}}} vs {{{}}}",
-            diff_a.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "),
-            diff_b.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "),
+            diff_a
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+            diff_b
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
         );
         return (ConflictType::Temporal, Some(diff_desc));
     }
@@ -196,8 +250,16 @@ fn classify_entity_substitution(
     if (temporal_a || date_a) && (temporal_b || date_b) {
         let diff_desc = format!(
             "date substitution: {{{}}} vs {{{}}}",
-            diff_a.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "),
-            diff_b.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "),
+            diff_a
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+            diff_b
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
         );
         return (ConflictType::Temporal, Some(diff_desc));
     }
@@ -213,17 +275,19 @@ fn classify_entity_substitution(
     let mut entity_names_a: Vec<String> = Vec::new();
     let mut entity_names_b: Vec<String> = Vec::new();
 
-    if let Ok(mut stmt) = conn.prepare_cached(
-        "SELECT name, entity_type FROM entities WHERE LOWER(name) = ?1"
-    ) {
+    if let Ok(mut stmt) =
+        conn.prepare_cached("SELECT name, entity_type FROM entities WHERE LOWER(name) = ?1")
+    {
         for word in &diff_a {
-            if let Ok(etype) = stmt.query_row(params![word.as_str()], |row| row.get::<_, String>(1)) {
+            if let Ok(etype) = stmt.query_row(params![word.as_str()], |row| row.get::<_, String>(1))
+            {
                 entity_types_a.push(etype);
                 entity_names_a.push(word.to_string());
             }
         }
         for word in &diff_b {
-            if let Ok(etype) = stmt.query_row(params![word.as_str()], |row| row.get::<_, String>(1)) {
+            if let Ok(etype) = stmt.query_row(params![word.as_str()], |row| row.get::<_, String>(1))
+            {
                 entity_types_b.push(etype);
                 entity_names_b.push(word.to_string());
             }
@@ -232,10 +296,14 @@ fn classify_entity_substitution(
 
     // Multi-word entity matching
     if entity_types_a.is_empty() && diff_a.len() >= 2 {
-        let joined: String = diff_a.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(" ");
-        if let Ok(mut stmt) = conn.prepare_cached(
-            "SELECT name, entity_type FROM entities WHERE LOWER(name) = ?1"
-        ) {
+        let joined: String = diff_a
+            .iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        if let Ok(mut stmt) =
+            conn.prepare_cached("SELECT name, entity_type FROM entities WHERE LOWER(name) = ?1")
+        {
             if let Ok((name, etype)) = stmt.query_row(params![joined], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
             }) {
@@ -245,10 +313,14 @@ fn classify_entity_substitution(
         }
     }
     if entity_types_b.is_empty() && diff_b.len() >= 2 {
-        let joined: String = diff_b.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(" ");
-        if let Ok(mut stmt) = conn.prepare_cached(
-            "SELECT name, entity_type FROM entities WHERE LOWER(name) = ?1"
-        ) {
+        let joined: String = diff_b
+            .iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        if let Ok(mut stmt) =
+            conn.prepare_cached("SELECT name, entity_type FROM entities WHERE LOWER(name) = ?1")
+        {
             if let Ok((name, etype)) = stmt.query_row(params![joined], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
             }) {
@@ -443,13 +515,20 @@ pub fn detect_edge_conflicts(
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
 
-        existing.into_iter().map(|(_edge_id, existing_dst)| {
-            let memory_a = find_memory_for_edge(&conn, src, &existing_dst, rel_type).ok().flatten();
-            let memory_b = incoming_target_rid
-                .map(String::from)
-                .or_else(|| find_memory_for_edge(&conn, src, dst, rel_type).ok().flatten());
-            (existing_dst, memory_a, memory_b)
-        }).collect()
+        existing
+            .into_iter()
+            .map(|(_edge_id, existing_dst)| {
+                let memory_a = find_memory_for_edge(&conn, src, &existing_dst, rel_type)
+                    .ok()
+                    .flatten();
+                let memory_b = incoming_target_rid.map(String::from).or_else(|| {
+                    find_memory_for_edge(&conn, src, dst, rel_type)
+                        .ok()
+                        .flatten()
+                });
+                (existing_dst, memory_a, memory_b)
+            })
+            .collect()
     }; // conn lock released here
 
     for (existing_dst, memory_a, memory_b) in edge_data {
@@ -489,7 +568,14 @@ pub fn scan_conflicts_limited(db: &YantrikDB, max_conflicts: usize) -> Result<Ve
 
     // Phase 1: Collect edge-based conflict candidates while holding conn lock.
     // Each candidate: (src, rel_type, dst_i, dst_j, mem_a, mem_b)
-    let edge_candidates: Vec<(String, String, String, String, Option<String>, Option<String>)>;
+    let edge_candidates: Vec<(
+        String,
+        String,
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+    )>;
     let entity_groups: std::collections::HashMap<String, Vec<(String, String, Vec<u8>)>>;
     let cm_rows: Vec<(String, String, String)>;
 
@@ -530,9 +616,20 @@ pub fn scan_conflicts_limited(db: &YantrikDB, max_conflicts: usize) -> Result<Ve
 
             for i in 0..dsts.len() {
                 for j in (i + 1)..dsts.len() {
-                    let mem_a = find_memory_for_edge(&conn, &src, &dsts[i], &rel_type).ok().flatten();
-                    let mem_b = find_memory_for_edge(&conn, &src, &dsts[j], &rel_type).ok().flatten();
-                    candidates.push((src.clone(), rel_type.clone(), dsts[i].clone(), dsts[j].clone(), mem_a, mem_b));
+                    let mem_a = find_memory_for_edge(&conn, &src, &dsts[i], &rel_type)
+                        .ok()
+                        .flatten();
+                    let mem_b = find_memory_for_edge(&conn, &src, &dsts[j], &rel_type)
+                        .ok()
+                        .flatten();
+                    candidates.push((
+                        src.clone(),
+                        rel_type.clone(),
+                        dsts[i].clone(),
+                        dsts[j].clone(),
+                        mem_a,
+                        mem_b,
+                    ));
                 }
             }
         }
@@ -619,7 +716,8 @@ pub fn scan_conflicts_limited(db: &YantrikDB, max_conflicts: usize) -> Result<Ve
 
     // Entity-based semantic conflicts
     {
-        let mut seen_pairs: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+        let mut seen_pairs: std::collections::HashSet<(String, String)> =
+            std::collections::HashSet::new();
 
         for (entity, memories) in &entity_groups {
             if conflicts.len() >= max_conflicts {
@@ -651,14 +749,24 @@ pub fn scan_conflicts_limited(db: &YantrikDB, max_conflicts: usize) -> Result<Ve
                     // Similar topic (>0.5) but not exact duplicate (<0.98)
                     if sim > 0.5 && sim < 0.98 {
                         // Compute word-level Jaccard to detect different content
-                        let words_a: std::collections::HashSet<&str> =
-                            text_a.split_whitespace().map(|w| w.trim_matches(|c: char| !c.is_alphanumeric())).filter(|w| !w.is_empty()).collect();
-                        let words_b: std::collections::HashSet<&str> =
-                            text_b.split_whitespace().map(|w| w.trim_matches(|c: char| !c.is_alphanumeric())).filter(|w| !w.is_empty()).collect();
+                        let words_a: std::collections::HashSet<&str> = text_a
+                            .split_whitespace()
+                            .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
+                            .filter(|w| !w.is_empty())
+                            .collect();
+                        let words_b: std::collections::HashSet<&str> = text_b
+                            .split_whitespace()
+                            .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
+                            .filter(|w| !w.is_empty())
+                            .collect();
 
                         let intersection = words_a.intersection(&words_b).count();
                         let union = words_a.union(&words_b).count();
-                        let jaccard = if union > 0 { intersection as f64 / union as f64 } else { 1.0 };
+                        let jaccard = if union > 0 {
+                            intersection as f64 / union as f64
+                        } else {
+                            1.0
+                        };
 
                         // High semantic similarity + low word overlap = likely contradiction
                         // (they're about the same topic but say different things)
@@ -674,12 +782,17 @@ pub fn scan_conflicts_limited(db: &YantrikDB, max_conflicts: usize) -> Result<Ve
                                     Some(ref desc) => format!(
                                         "Memories sharing entity '{}' contradict via {}: \
                                          similarity={:.0}%, word_overlap={:.0}%",
-                                        entity, desc, sim * 100.0, jaccard * 100.0
+                                        entity,
+                                        desc,
+                                        sim * 100.0,
+                                        jaccard * 100.0
                                     ),
                                     None => format!(
                                         "Memories sharing entity '{}' may contradict: \
                                          similarity={:.0}%, word_overlap={:.0}%",
-                                        entity, sim * 100.0, jaccard * 100.0
+                                        entity,
+                                        sim * 100.0,
+                                        jaccard * 100.0
                                     ),
                                 };
 
@@ -806,14 +919,49 @@ mod tests {
     fn test_conflict_dedup() {
         let db = YantrikDB::new(":memory:", 8).unwrap();
         let rid_a = db
-            .record("a", "episodic", 0.5, 0.0, 604800.0, &empty_meta(), &vec_seed(1.0, 8), "default", 0.8, "general", "user", None)
+            .record(
+                "a",
+                "episodic",
+                0.5,
+                0.0,
+                604800.0,
+                &empty_meta(),
+                &vec_seed(1.0, 8),
+                "default",
+                0.8,
+                "general",
+                "user",
+                None,
+            )
             .unwrap();
         let rid_b = db
-            .record("b", "episodic", 0.5, 0.0, 604800.0, &empty_meta(), &vec_seed(2.0, 8), "default", 0.8, "general", "user", None)
+            .record(
+                "b",
+                "episodic",
+                0.5,
+                0.0,
+                604800.0,
+                &empty_meta(),
+                &vec_seed(2.0, 8),
+                "default",
+                0.8,
+                "general",
+                "user",
+                None,
+            )
             .unwrap();
 
         assert!(!conflict_exists(&db, &rid_a, &rid_b).unwrap());
-        create_conflict(&db, &ConflictType::Minor, &rid_a, &rid_b, None, None, "test").unwrap();
+        create_conflict(
+            &db,
+            &ConflictType::Minor,
+            &rid_a,
+            &rid_b,
+            None,
+            None,
+            "test",
+        )
+        .unwrap();
         assert!(conflict_exists(&db, &rid_a, &rid_b).unwrap());
         assert!(conflict_exists(&db, &rid_b, &rid_a).unwrap()); // reversed order
     }

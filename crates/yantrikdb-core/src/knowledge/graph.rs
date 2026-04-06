@@ -37,20 +37,82 @@ pub fn entity_matches_text(entity: &str, text_tokens: &[String]) -> bool {
 
 /// Tech terms that should NOT be classified as person names even if title-cased/all-caps.
 const TECH_BLOCKLIST: &[&str] = &[
-    "faiss", "onnx", "scann", "redis", "kafka", "docker", "kubernetes", "react",
-    "python", "rust", "java", "swift", "flutter", "pytorch", "tensorflow",
-    "numpy", "pandas", "spark", "hadoop", "nginx", "postgres", "mysql",
-    "sqlite", "graphql", "grpc", "oauth", "jwt", "html", "css",
-    "api", "sdk", "ml", "ai", "gpu", "cpu", "ram", "ssd", "aws", "gcp",
-    "claude", "openai", "anthropic", "gemini", "llama", "ollama",
+    "faiss",
+    "onnx",
+    "scann",
+    "redis",
+    "kafka",
+    "docker",
+    "kubernetes",
+    "react",
+    "python",
+    "rust",
+    "java",
+    "swift",
+    "flutter",
+    "pytorch",
+    "tensorflow",
+    "numpy",
+    "pandas",
+    "spark",
+    "hadoop",
+    "nginx",
+    "postgres",
+    "mysql",
+    "sqlite",
+    "graphql",
+    "grpc",
+    "oauth",
+    "jwt",
+    "html",
+    "css",
+    "api",
+    "sdk",
+    "ml",
+    "ai",
+    "gpu",
+    "cpu",
+    "ram",
+    "ssd",
+    "aws",
+    "gcp",
+    "claude",
+    "openai",
+    "anthropic",
+    "gemini",
+    "llama",
+    "ollama",
 ];
 
 /// Words that indicate the entity is NOT a person when used as first word.
 const NON_PERSON_PREFIXES: &[&str] = &[
-    "project", "team", "company", "group", "department", "org", "the",
-    "operation", "task", "plan", "system", "service", "app", "tool",
-    "code", "server", "client", "api", "db", "database", "agent",
-    "model", "version", "release", "build", "deploy", "config",
+    "project",
+    "team",
+    "company",
+    "group",
+    "department",
+    "org",
+    "the",
+    "operation",
+    "task",
+    "plan",
+    "system",
+    "service",
+    "app",
+    "tool",
+    "code",
+    "server",
+    "client",
+    "api",
+    "db",
+    "database",
+    "agent",
+    "model",
+    "version",
+    "release",
+    "build",
+    "deploy",
+    "config",
 ];
 
 /// Classify an entity name into a type: "person", "tech", or "unknown".
@@ -69,7 +131,11 @@ pub fn classify_entity_type(name: &str) -> &'static str {
     }
 
     // All-caps multi-char → tech (e.g., "FAISS", "ONNX")
-    if trimmed.len() > 1 && trimmed.chars().all(|c| c.is_uppercase() || !c.is_alphabetic()) {
+    if trimmed.len() > 1
+        && trimmed
+            .chars()
+            .all(|c| c.is_uppercase() || !c.is_alphabetic())
+    {
         return "tech";
     }
 
@@ -87,7 +153,10 @@ pub fn classify_entity_type(name: &str) -> &'static str {
                 return "unknown";
             }
             // Also reject if any word is in tech blocklist
-            if words.iter().any(|w| TECH_BLOCKLIST.contains(&w.to_lowercase().as_str())) {
+            if words
+                .iter()
+                .any(|w| TECH_BLOCKLIST.contains(&w.to_lowercase().as_str()))
+            {
                 return "tech";
             }
             return "person";
@@ -101,62 +170,128 @@ pub fn classify_entity_type(name: &str) -> &'static str {
 
 /// Relationship types that imply both src and dst are persons.
 const PERSON_PERSON_RELS: &[&str] = &[
-    "married_to", "mother_of", "father_of", "daughter_of", "son_of",
-    "sister_of", "brother_of", "sibling_of", "parent_of", "child_of",
-    "knows", "friends_with", "met", "dating", "engaged_to",
-    "mentors", "mentored_by", "reports_to", "manages",
-    "colleagues", "roommate", "neighbor",
-    "called", "texted", "messaged", "date_night",
+    "married_to",
+    "mother_of",
+    "father_of",
+    "daughter_of",
+    "son_of",
+    "sister_of",
+    "brother_of",
+    "sibling_of",
+    "parent_of",
+    "child_of",
+    "knows",
+    "friends_with",
+    "met",
+    "dating",
+    "engaged_to",
+    "mentors",
+    "mentored_by",
+    "reports_to",
+    "manages",
+    "colleagues",
+    "roommate",
+    "neighbor",
+    "called",
+    "texted",
+    "messaged",
+    "date_night",
 ];
 
 /// Relationship types where dst is a place.
 const PLACE_DST_RELS: &[&str] = &[
-    "lives_in", "born_in", "grew_up_in", "located_in", "based_in",
-    "visited", "moved_to", "traveled_to", "from",
+    "lives_in",
+    "born_in",
+    "grew_up_in",
+    "located_in",
+    "based_in",
+    "visited",
+    "moved_to",
+    "traveled_to",
+    "from",
 ];
 
 /// Relationship types where dst is an organization / institution.
 const ORG_DST_RELS: &[&str] = &[
-    "works_at", "works_for", "employed_at", "employed_by",
-    "studied_at", "attended", "enrolled_in", "graduated_from",
-    "member_of", "belongs_to", "founded",
+    "works_at",
+    "works_for",
+    "employed_at",
+    "employed_by",
+    "studied_at",
+    "attended",
+    "enrolled_in",
+    "graduated_from",
+    "member_of",
+    "belongs_to",
+    "founded",
 ];
 
 /// Relationship types where dst is tech/tool (src is project or person).
 const TECH_DST_RELS: &[&str] = &[
-    "built_with", "uses", "depends_on", "integrates", "requires",
-    "written_in", "coded_in", "implemented_with", "powered_by",
-    "runs_on", "compiled_with",
+    "built_with",
+    "uses",
+    "depends_on",
+    "integrates",
+    "requires",
+    "written_in",
+    "coded_in",
+    "implemented_with",
+    "powered_by",
+    "runs_on",
+    "compiled_with",
 ];
 
 /// Relationship types where dst is infrastructure.
 const INFRA_DST_RELS: &[&str] = &[
-    "deployed_on", "hosted_on", "deployed_to", "hosted_at",
-    "runs_on_infra", "served_by",
+    "deployed_on",
+    "hosted_on",
+    "deployed_to",
+    "hosted_at",
+    "runs_on_infra",
+    "served_by",
 ];
 
 /// Relationship types where src is a person and dst is a project/thing.
 const PERSON_PROJECT_RELS: &[&str] = &[
-    "works_on", "contributes_to", "maintains", "leads", "created",
-    "built", "designed", "architected", "owns",
+    "works_on",
+    "contributes_to",
+    "maintains",
+    "leads",
+    "created",
+    "built",
+    "designed",
+    "architected",
+    "owns",
 ];
 
 /// Relationship types where src is a project and dst is a project (dependency).
 const PROJECT_PROJECT_RELS: &[&str] = &[
-    "depends_on_project", "extends", "forks", "replaces",
-    "supersedes", "derived_from",
+    "depends_on_project",
+    "extends",
+    "forks",
+    "replaces",
+    "supersedes",
+    "derived_from",
 ];
 
 /// Relationship types where dst is an event or activity.
 const EVENT_DST_RELS: &[&str] = &[
-    "attended_event", "participated_in", "scheduled_for",
-    "presented_at", "spoke_at",
+    "attended_event",
+    "participated_in",
+    "scheduled_for",
+    "presented_at",
+    "spoke_at",
 ];
 
 /// Relationship types where dst is a concept/topic.
 const CONCEPT_DST_RELS: &[&str] = &[
-    "interested_in", "studies", "researches", "specializes_in",
-    "expert_in", "learning", "teaches",
+    "interested_in",
+    "studies",
+    "researches",
+    "specializes_in",
+    "expert_in",
+    "learning",
+    "teaches",
 ];
 
 /// Classify entity types using relationship semantics.
@@ -187,13 +322,27 @@ pub fn classify_with_relationship(
     // * → Tech/Tool relationships (src type from name heuristic)
     if TECH_DST_RELS.contains(&rel) {
         let src_type = classify_entity_type(src);
-        return (if src_type == "unknown" { "project" } else { src_type }, "tech");
+        return (
+            if src_type == "unknown" {
+                "project"
+            } else {
+                src_type
+            },
+            "tech",
+        );
     }
 
     // * → Infrastructure relationships
     if INFRA_DST_RELS.contains(&rel) {
         let src_type = classify_entity_type(src);
-        return (if src_type == "unknown" { "project" } else { src_type }, "infrastructure");
+        return (
+            if src_type == "unknown" {
+                "project"
+            } else {
+                src_type
+            },
+            "infrastructure",
+        );
     }
 
     // Person → Project relationships
@@ -225,14 +374,20 @@ pub fn entities_for_memories(conn: &Connection, rids: &[&str]) -> Result<Vec<Str
     if rids.is_empty() {
         return Ok(vec![]);
     }
-    let placeholders: String = (0..rids.len()).map(|i| format!("?{}", i + 1)).collect::<Vec<_>>().join(",");
+    let placeholders: String = (0..rids.len())
+        .map(|i| format!("?{}", i + 1))
+        .collect::<Vec<_>>()
+        .join(",");
     let sql = format!(
         "SELECT DISTINCT entity_name FROM memory_entities WHERE memory_rid IN ({placeholders})"
     );
     let mut stmt = conn.prepare(&sql)?;
-    let param_values: Vec<Box<dyn rusqlite::types::ToSql>> =
-        rids.iter().map(|r| Box::new(r.to_string()) as Box<dyn rusqlite::types::ToSql>).collect();
-    let params_ref: Vec<&dyn rusqlite::types::ToSql> = param_values.iter().map(|p| p.as_ref()).collect();
+    let param_values: Vec<Box<dyn rusqlite::types::ToSql>> = rids
+        .iter()
+        .map(|r| Box::new(r.to_string()) as Box<dyn rusqlite::types::ToSql>)
+        .collect();
+    let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+        param_values.iter().map(|p| p.as_ref()).collect();
     let entities = stmt
         .query_map(params_ref.as_slice(), |row| row.get(0))?
         .collect::<std::result::Result<Vec<String>, _>>()?;
@@ -244,14 +399,20 @@ pub fn memories_for_entities(conn: &Connection, entity_names: &[&str]) -> Result
     if entity_names.is_empty() {
         return Ok(HashSet::new());
     }
-    let placeholders: String = (0..entity_names.len()).map(|i| format!("?{}", i + 1)).collect::<Vec<_>>().join(",");
+    let placeholders: String = (0..entity_names.len())
+        .map(|i| format!("?{}", i + 1))
+        .collect::<Vec<_>>()
+        .join(",");
     let sql = format!(
         "SELECT DISTINCT memory_rid FROM memory_entities WHERE entity_name IN ({placeholders})"
     );
     let mut stmt = conn.prepare(&sql)?;
-    let param_values: Vec<Box<dyn rusqlite::types::ToSql>> =
-        entity_names.iter().map(|e| Box::new(e.to_string()) as Box<dyn rusqlite::types::ToSql>).collect();
-    let params_ref: Vec<&dyn rusqlite::types::ToSql> = param_values.iter().map(|p| p.as_ref()).collect();
+    let param_values: Vec<Box<dyn rusqlite::types::ToSql>> = entity_names
+        .iter()
+        .map(|e| Box::new(e.to_string()) as Box<dyn rusqlite::types::ToSql>)
+        .collect();
+    let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+        param_values.iter().map(|p| p.as_ref()).collect();
     let rids = stmt
         .query_map(params_ref.as_slice(), |row| row.get(0))?
         .collect::<std::result::Result<HashSet<String>, _>>()?;
@@ -276,10 +437,8 @@ pub fn expand_entities_nhop(
         result.push((s.to_string(), 0, 1.0));
     }
 
-    let mut frontier: VecDeque<(String, u8, f64)> = seeds
-        .iter()
-        .map(|s| (s.to_string(), 0u8, 1.0f64))
-        .collect();
+    let mut frontier: VecDeque<(String, u8, f64)> =
+        seeds.iter().map(|s| (s.to_string(), 0u8, 1.0f64)).collect();
 
     while let Some((entity, hops, weight)) = frontier.pop_front() {
         if hops >= max_hops || result.len() >= max_entities {
@@ -361,9 +520,54 @@ mod tests {
 
         // Record memories and link to entities
         let emb = vec![1.0f32, 0.0, 0.0, 0.0];
-        let r1 = db.record("Alice discussed the plan", "episodic", 0.5, 0.0, 604800.0, &serde_json::json!({}), &emb, "default", 0.8, "general", "user", None).unwrap();
-        let r2 = db.record("Bob reviewed the code", "episodic", 0.5, 0.0, 604800.0, &serde_json::json!({}), &emb, "default", 0.8, "general", "user", None).unwrap();
-        let r3 = db.record("Charlie deployed to production", "episodic", 0.5, 0.0, 604800.0, &serde_json::json!({}), &emb, "default", 0.8, "general", "user", None).unwrap();
+        let r1 = db
+            .record(
+                "Alice discussed the plan",
+                "episodic",
+                0.5,
+                0.0,
+                604800.0,
+                &serde_json::json!({}),
+                &emb,
+                "default",
+                0.8,
+                "general",
+                "user",
+                None,
+            )
+            .unwrap();
+        let r2 = db
+            .record(
+                "Bob reviewed the code",
+                "episodic",
+                0.5,
+                0.0,
+                604800.0,
+                &serde_json::json!({}),
+                &emb,
+                "default",
+                0.8,
+                "general",
+                "user",
+                None,
+            )
+            .unwrap();
+        let r3 = db
+            .record(
+                "Charlie deployed to production",
+                "episodic",
+                0.5,
+                0.0,
+                604800.0,
+                &serde_json::json!({}),
+                &emb,
+                "default",
+                0.8,
+                "general",
+                "user",
+                None,
+            )
+            .unwrap();
 
         db.link_memory_entity(&r1, "Alice").unwrap();
         db.link_memory_entity(&r1, "ProjectX").unwrap();
@@ -377,9 +581,14 @@ mod tests {
     fn test_entities_for_memories() {
         let db = setup_db();
         // Get the first memory's rid
-        let rid: String = db.conn().query_row(
-            "SELECT rid FROM memories ORDER BY created_at LIMIT 1", [], |row| row.get(0),
-        ).unwrap();
+        let rid: String = db
+            .conn()
+            .query_row(
+                "SELECT rid FROM memories ORDER BY created_at LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
 
         let entities = entities_for_memories(&*db.conn(), &[&rid]).unwrap();
         assert!(entities.contains(&"Alice".to_string()));
@@ -425,10 +634,12 @@ mod tests {
     fn test_no_tombstoned_edges() {
         let db = setup_db();
         // Tombstone the Alice->Bob edge
-        db.conn().execute(
-            "UPDATE edges SET tombstoned = 1 WHERE src = 'Alice' AND dst = 'Bob'",
-            [],
-        ).unwrap();
+        db.conn()
+            .execute(
+                "UPDATE edges SET tombstoned = 1 WHERE src = 'Alice' AND dst = 'Bob'",
+                [],
+            )
+            .unwrap();
         let expanded = expand_entities_nhop(&*db.conn(), &["Alice"], 1, 30).unwrap();
         let names: HashSet<String> = expanded.iter().map(|(n, _, _)| n.clone()).collect();
         // Bob should NOT be reachable via tombstoned edge
@@ -440,9 +651,14 @@ mod tests {
     #[test]
     fn test_graph_proximity_score() {
         let db = setup_db();
-        let rid: String = db.conn().query_row(
-            "SELECT rid FROM memories ORDER BY created_at LIMIT 1", [], |row| row.get(0),
-        ).unwrap();
+        let rid: String = db
+            .conn()
+            .query_row(
+                "SELECT rid FROM memories ORDER BY created_at LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
 
         let mut expanded = HashMap::new();
         expanded.insert("Alice".to_string(), (0u8, 1.0f64));
