@@ -9,6 +9,7 @@ pub struct ServerConfig {
     pub embedding: EmbeddingSection,
     pub background: BackgroundSection,
     pub limits: LimitsSection,
+    pub cluster: ClusterSection,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -69,6 +70,116 @@ pub struct LimitsSection {
     pub max_connections: usize,
 }
 
+// ── Cluster / Replication ──────────────────────────────────────
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct ClusterSection {
+    /// Unique node identifier (used for HLC and Raft).
+    /// 0 means single-node mode (no replication).
+    pub node_id: u32,
+
+    /// Role for this node in the cluster.
+    pub role: NodeRole,
+
+    /// Address other peers should use to reach this node (host:port).
+    /// If unset, derived from server.wire_port + hostname.
+    pub advertise_addr: Option<String>,
+
+    /// List of peer nodes in the cluster.
+    pub peers: Vec<PeerConfig>,
+
+    /// Heartbeat interval in milliseconds (default 1000ms = 1s).
+    pub heartbeat_interval_ms: u64,
+
+    /// Election timeout in milliseconds (default 5000ms = 5s).
+    /// If a follower doesn't hear from leader for this long, election starts.
+    pub election_timeout_ms: u64,
+
+    /// Shared cluster secret for authenticating peer connections.
+    /// All nodes in a cluster must share the same secret.
+    pub cluster_secret: Option<String>,
+
+    /// Replication mode: async (default) or sync.
+    pub replication_mode: ReplicationMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeRole {
+    /// Standalone node, no replication. Default.
+    Single,
+    /// Full data node that can become primary or secondary via election.
+    Voter,
+    /// Read-only replica that consumes oplog but never votes or accepts writes.
+    ReadReplica,
+    /// Witness — vote-only node, no data storage. Tiebreaker for 2-node clusters.
+    Witness,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReplicationMode {
+    /// Writes return immediately, replicas catch up asynchronously.
+    Async,
+    /// Writes block until quorum of secondaries ack.
+    Sync,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PeerConfig {
+    /// Peer's wire protocol address (host:port).
+    pub addr: String,
+    /// Peer's role in the cluster.
+    pub role: NodeRole,
+}
+
+impl Default for ClusterSection {
+    fn default() -> Self {
+        Self {
+            node_id: 0,
+            role: NodeRole::Single,
+            advertise_addr: None,
+            peers: Vec::new(),
+            heartbeat_interval_ms: 1000,
+            election_timeout_ms: 5000,
+            cluster_secret: None,
+            replication_mode: ReplicationMode::Async,
+        }
+    }
+}
+
+impl ClusterSection {
+    /// Whether replication is enabled (i.e. not single-node mode).
+    pub fn is_clustered(&self) -> bool {
+        self.role != NodeRole::Single
+    }
+
+    /// Total voter count (this node + voter peers, excluding witness/read replicas).
+    pub fn voter_count(&self) -> usize {
+        let self_voter = matches!(self.role, NodeRole::Voter) as usize;
+        let peer_voters = self.peers.iter().filter(|p| p.role == NodeRole::Voter).count();
+        self_voter + peer_voters
+    }
+
+    /// Total quorum members (voters + witnesses) for elections.
+    pub fn quorum_members(&self) -> usize {
+        let self_member = matches!(self.role, NodeRole::Voter | NodeRole::Witness) as usize;
+        let peer_members = self
+            .peers
+            .iter()
+            .filter(|p| matches!(p.role, NodeRole::Voter | NodeRole::Witness))
+            .count();
+        self_member + peer_members
+    }
+
+    /// Quorum size needed for elections (N/2 + 1).
+    pub fn quorum_size(&self) -> usize {
+        let total = self.quorum_members();
+        total / 2 + 1
+    }
+}
+
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
@@ -77,6 +188,7 @@ impl Default for ServerConfig {
             embedding: EmbeddingSection::default(),
             background: BackgroundSection::default(),
             limits: LimitsSection::default(),
+            cluster: ClusterSection::default(),
         }
     }
 }

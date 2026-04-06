@@ -408,6 +408,127 @@ pub struct ErrorResponse {
     pub details: Option<HashMap<String, serde_json::Value>>,
 }
 
+// ── Cluster / Replication ─────────────────────────────────────────
+
+/// Initial peer-to-peer handshake.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ClusterHello {
+    pub node_id: u32,
+    pub role: String, // "voter" | "read_replica" | "witness"
+    pub current_term: u64,
+    pub cluster_secret: String,
+    pub advertise_addr: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ClusterHelloOk {
+    pub node_id: u32,
+    pub role: String,
+    pub current_term: u64,
+    pub leader_id: Option<u32>,
+}
+
+/// Request operations from a peer's oplog since a watermark.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct OplogPullRequest {
+    pub since_hlc: Option<Vec<u8>>,    // 16-byte HLC timestamp, None for "from beginning"
+    pub since_op_id: Option<String>,
+    pub limit: usize,                   // max ops per batch
+    pub exclude_actor: Option<String>,  // skip ops from this actor (avoid loops)
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct OplogPullResult {
+    pub ops: Vec<OplogEntryWire>,
+    pub has_more: bool,
+}
+
+/// Wire-friendly representation of an oplog entry.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct OplogEntryWire {
+    pub op_id: String,
+    pub op_type: String,
+    pub timestamp: f64,
+    pub target_rid: Option<String>,
+    pub payload: serde_json::Value,
+    pub actor_id: String,
+    pub hlc: Vec<u8>,
+    pub embedding_hash: Option<Vec<u8>>,
+    pub origin_actor: String,
+}
+
+/// Push ops to a peer (used by primary → secondary push).
+#[derive(Debug, Serialize, Deserialize)]
+pub struct OplogPushRequest {
+    pub ops: Vec<OplogEntryWire>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct OplogPushOkResponse {
+    pub applied: usize,
+    pub last_hlc: Vec<u8>,
+    pub last_op_id: String,
+}
+
+/// Heartbeat from leader to followers.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct HeartbeatMsg {
+    pub term: u64,
+    pub leader_id: u32,
+    pub leader_last_hlc: Vec<u8>,
+    pub leader_last_op_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct HeartbeatAckMsg {
+    pub term: u64,
+    pub follower_id: u32,
+    pub follower_role: String,
+    pub follower_last_hlc: Vec<u8>,
+    pub follower_last_op_id: String,
+    pub lag_seconds: f64,
+}
+
+/// Vote request from a candidate during election.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RequestVoteMsg {
+    pub term: u64,
+    pub candidate_id: u32,
+    pub last_log_hlc: Vec<u8>,
+    pub last_log_op_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct VoteResponseMsg {
+    pub term: u64,
+    pub voter_id: u32,
+    pub granted: bool,
+    pub reason: Option<String>,
+}
+
+/// Cluster overview request.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ClusterStatusResultMsg {
+    pub current_term: u64,
+    pub leader_id: Option<u32>,
+    pub self_id: u32,
+    pub self_role: String,
+    pub peers: Vec<PeerStatusMsg>,
+    pub quorum_size: usize,
+    pub healthy: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PeerStatusMsg {
+    pub node_id: u32,
+    pub addr: String,
+    pub role: String,
+    pub reachable: bool,
+    pub current_term: u64,
+    pub last_seen_secs_ago: f64,
+    pub lag_seconds: f64,
+}
+
 // ── Error codes ───────────────────────────────────────────────────
 
 pub mod error_codes {
@@ -419,4 +540,10 @@ pub mod error_codes {
     pub const INVALID_PAYLOAD: u16 = 4000;
     pub const INTERNAL_ERROR: u16 = 5000;
     pub const EMBEDDING_ERROR: u16 = 5001;
+    // Cluster errors
+    pub const READONLY_NODE: u16 = 6000;       // Can't write to read replica
+    pub const NOT_LEADER: u16 = 6001;          // Try the current leader instead
+    pub const NO_QUORUM: u16 = 6002;           // Cluster lost quorum
+    pub const CLUSTER_SECRET_MISMATCH: u16 = 6003;
+    pub const PEER_TERM_MISMATCH: u16 = 6004;
 }

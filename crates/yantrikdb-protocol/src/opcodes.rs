@@ -64,6 +64,22 @@ pub enum OpCode {
     Stats = 0xA1,
     InfoResult = 0xA2,
 
+    // --- Cluster / Replication (0xC0–0xCF) ---
+    ClusterHello = 0xC0,       // Initial peer handshake
+    ClusterHelloOk = 0xC1,     // Handshake response
+    OplogPull = 0xC2,          // Request ops since (hlc, op_id)
+    OplogPullResult = 0xC3,    // Batch of ops
+    OplogPush = 0xC4,          // Push ops to peer (primary → secondary)
+    OplogPushOk = 0xC5,        // Ack with last_applied (hlc, op_id)
+    Heartbeat = 0xC6,          // Leader → follower heartbeat
+    HeartbeatAck = 0xC7,       // Follower → leader ack with current state
+    RequestVote = 0xC8,        // Candidate requests vote
+    VoteGranted = 0xC9,        // Vote granted
+    VoteDenied = 0xCA,         // Vote denied
+    ClusterStatus = 0xCB,      // Get cluster overview
+    ClusterStatusResult = 0xCC,
+    ReadOnlyError = 0xCD,      // Sent when client tries to write to read-only replica
+
     // --- Control (0xF0–0xF2) ---
     Error = 0xF0,
     Ping = 0xF1,
@@ -118,6 +134,21 @@ impl OpCode {
             0xA1 => Some(Self::Stats),
             0xA2 => Some(Self::InfoResult),
 
+            0xC0 => Some(Self::ClusterHello),
+            0xC1 => Some(Self::ClusterHelloOk),
+            0xC2 => Some(Self::OplogPull),
+            0xC3 => Some(Self::OplogPullResult),
+            0xC4 => Some(Self::OplogPush),
+            0xC5 => Some(Self::OplogPushOk),
+            0xC6 => Some(Self::Heartbeat),
+            0xC7 => Some(Self::HeartbeatAck),
+            0xC8 => Some(Self::RequestVote),
+            0xC9 => Some(Self::VoteGranted),
+            0xCA => Some(Self::VoteDenied),
+            0xCB => Some(Self::ClusterStatus),
+            0xCC => Some(Self::ClusterStatusResult),
+            0xCD => Some(Self::ReadOnlyError),
+
             0xF0 => Some(Self::Error),
             0xF1 => Some(Self::Ping),
             0xF2 => Some(Self::Pong),
@@ -165,6 +196,20 @@ mod tests {
             OpCode::Conflicts,
             OpCode::Resolve,
             OpCode::ConflictResult,
+            OpCode::ClusterHello,
+            OpCode::ClusterHelloOk,
+            OpCode::OplogPull,
+            OpCode::OplogPullResult,
+            OpCode::OplogPush,
+            OpCode::OplogPushOk,
+            OpCode::Heartbeat,
+            OpCode::HeartbeatAck,
+            OpCode::RequestVote,
+            OpCode::VoteGranted,
+            OpCode::VoteDenied,
+            OpCode::ClusterStatus,
+            OpCode::ClusterStatusResult,
+            OpCode::ReadOnlyError,
             OpCode::Personality,
             OpCode::Stats,
             OpCode::InfoResult,

@@ -1,5 +1,6 @@
 mod auth;
 mod background;
+mod cluster;
 mod command;
 mod config;
 mod control;
