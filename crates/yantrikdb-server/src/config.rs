@@ -72,7 +72,12 @@ impl Default for EncryptionSection {
     fn default() -> Self {
         Self {
             key_path: None,
-            auto_generate: true,
+            // Default OFF: encryption is opt-in. Surprising users with
+            // silent encryption broke the v0.5.4 Proxmox deployment because
+            // the embedding backfill couldn't write through encrypt_embedding().
+            // To enable: set key_path or key_hex, OR set auto_generate = true
+            // explicitly in [encryption].
+            auto_generate: false,
             key_hex: None,
         }
     }
