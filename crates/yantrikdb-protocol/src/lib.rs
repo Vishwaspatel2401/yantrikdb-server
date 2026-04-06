@@ -24,8 +24,7 @@ pub fn unpack<'de, T: serde::Deserialize<'de>>(data: &'de [u8]) -> Result<T, Pro
 /// Use this in handlers instead of `unpack` directly when the payload may be compressed.
 pub fn unpack_frame<T: serde::de::DeserializeOwned>(frame: &Frame) -> Result<T, ProtocolError> {
     if frame.is_compressed() {
-        let decompressed = zstd::decode_all(&frame.payload[..])
-            .map_err(|e| ProtocolError::Io(e))?;
+        let decompressed = zstd::decode_all(&frame.payload[..]).map_err(ProtocolError::Io)?;
         Ok(rmp_serde::from_slice(&decompressed)?)
     } else {
         Ok(rmp_serde::from_slice(&frame.payload)?)
@@ -35,8 +34,7 @@ pub fn unpack_frame<T: serde::de::DeserializeOwned>(frame: &Frame) -> Result<T, 
 /// Pack and zstd-compress a message. Use for large payloads (oplog batches, recall results).
 pub fn pack_compressed<T: serde::Serialize>(msg: &T) -> Result<bytes::Bytes, ProtocolError> {
     let data = rmp_serde::to_vec_named(msg)?;
-    let compressed = zstd::encode_all(data.as_slice(), 3)
-        .map_err(|e| ProtocolError::Io(e))?;
+    let compressed = zstd::encode_all(data.as_slice(), 3).map_err(ProtocolError::Io)?;
     Ok(bytes::Bytes::from(compressed))
 }
 
@@ -51,7 +49,7 @@ pub fn make_frame_auto_compress<T: serde::Serialize>(
     if raw.len() < min_size_bytes {
         return Ok(Frame::new(opcode, stream_id, raw));
     }
-    let compressed = zstd::encode_all(&raw[..], 3).map_err(|e| ProtocolError::Io(e))?;
+    let compressed = zstd::encode_all(&raw[..], 3).map_err(ProtocolError::Io)?;
     // Only use compression if it actually saved space
     if compressed.len() < raw.len() {
         Ok(Frame::new(opcode, stream_id, bytes::Bytes::from(compressed)).with_compression())

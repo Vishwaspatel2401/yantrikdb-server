@@ -87,10 +87,7 @@ pub async fn run_sync_loop(ctx: Arc<ClusterContext>, cancel: CancellationToken) 
     }
 }
 
-async fn sync_database_list(
-    ctx: &Arc<ClusterContext>,
-    leader_addr: &str,
-) -> anyhow::Result<()> {
+async fn sync_database_list(ctx: &Arc<ClusterContext>, leader_addr: &str) -> anyhow::Result<()> {
     let mut conn = connect_and_handshake(leader_addr, ctx).await?;
     let req = ClusterDatabaseListRequest {};
     let frame = make_frame(OpCode::ClusterDatabaseList, 0, &req)?;
@@ -107,8 +104,7 @@ async fn sync_database_list(
     let result: ClusterDatabaseListResponse = unpack(&resp.payload)?;
 
     // Auto-create any missing databases
-    let local_dbs: std::collections::HashSet<String> =
-        ctx.list_databases().into_iter().collect();
+    let local_dbs: std::collections::HashSet<String> = ctx.list_databases().into_iter().collect();
     for db in &result.databases {
         if !local_dbs.contains(db) {
             if let Err(e) = ctx.ensure_database(db) {
@@ -136,8 +132,7 @@ async fn pull_db_from_leader(
     // Per-database watermark key: "{leader_addr}:{db_name}"
     let watermark_key = format!("{}:{}", leader_addr, db_name);
 
-    let watermark =
-        crate::cluster::replication::get_local_watermark(&engine, &watermark_key)?;
+    let watermark = crate::cluster::replication::get_local_watermark(&engine, &watermark_key)?;
 
     let (since_hlc, since_op_id) = match watermark {
         Some((hlc, op_id)) => (Some(hlc), Some(op_id)),
@@ -231,7 +226,9 @@ async fn backfill_embeddings(
              LIMIT 500",
         )?;
         let rows: Vec<_> = stmt
-            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
             .collect::<Result<_, _>>()?;
         rows
     };

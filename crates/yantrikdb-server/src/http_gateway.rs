@@ -569,7 +569,9 @@ async fn metrics(State(state): State<Arc<AppState>>) -> String {
             if cluster.state.is_leader() { 1 } else { 0 }
         ));
 
-        out.push_str("# HELP yantrikdb_cluster_healthy Whether this node has quorum (1) or not (0)\n");
+        out.push_str(
+            "# HELP yantrikdb_cluster_healthy Whether this node has quorum (1) or not (0)\n",
+        );
         out.push_str("# TYPE yantrikdb_cluster_healthy gauge\n");
         out.push_str(&format!(
             "yantrikdb_cluster_healthy {{node_id=\"{}\"}} {}\n",
@@ -601,7 +603,9 @@ async fn metrics(State(state): State<Arc<AppState>>) -> String {
                         stats.active_memories
                     ));
 
-                    out.push_str("# HELP yantrikdb_consolidated_memories Number of consolidated memories\n");
+                    out.push_str(
+                        "# HELP yantrikdb_consolidated_memories Number of consolidated memories\n",
+                    );
                     out.push_str("# TYPE yantrikdb_consolidated_memories gauge\n");
                     out.push_str(&format!(
                         "yantrikdb_consolidated_memories {{db=\"default\"}} {}\n",
@@ -615,7 +619,9 @@ async fn metrics(State(state): State<Arc<AppState>>) -> String {
                         stats.edges
                     ));
 
-                    out.push_str("# HELP yantrikdb_open_conflicts Number of unresolved conflicts\n");
+                    out.push_str(
+                        "# HELP yantrikdb_open_conflicts Number of unresolved conflicts\n",
+                    );
                     out.push_str("# TYPE yantrikdb_open_conflicts gauge\n");
                     out.push_str(&format!(
                         "yantrikdb_open_conflicts {{db=\"default\"}} {}\n",

@@ -47,7 +47,7 @@ jobs:
         run: cargo test -p yantrikdb-protocol
 
       - name: Test server (unit tests)
-        run: cargo test -p yantrikdb-server --lib
+        run: cargo test -p yantrikdb-server --bins
 
       - name: Test server (integration tests)
         run: cargo test -p yantrikdb-server --test http_integration

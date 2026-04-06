@@ -321,7 +321,9 @@ pub async fn run_oplog_gc_loop(
 
                 // Count current oplog
                 let total: i64 = conn
-                    .query_row("SELECT COUNT(*) FROM oplog WHERE applied = 1", [], |r| r.get(0))
+                    .query_row("SELECT COUNT(*) FROM oplog WHERE applied = 1", [], |r| {
+                        r.get(0)
+                    })
                     .unwrap_or(0);
 
                 if (total as usize) <= keep_recent {
