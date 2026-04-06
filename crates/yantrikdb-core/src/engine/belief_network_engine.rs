@@ -3,12 +3,13 @@
 //! Wires the belief_network module into `YantrikDB`, persisting
 //! the factor graph and providing integrated inference queries.
 
-use crate::belief_network::VariableId;
 use crate::belief_network::{
-    build_network_from_edges, information_gain, loopy_belief_propagation,
-    most_probable_explanation, network_diagnostics, query, sensitivity_to_evidence, BPConfig,
-    BPResult, BeliefNetwork, EdgeRelation, InferenceQuery, InferenceResult, NetworkHealth,
+    BeliefNetwork, BPConfig, BPResult, InferenceQuery, InferenceResult,
+    NetworkHealth, EdgeRelation,
+    loopy_belief_propagation, query, information_gain, sensitivity_to_evidence,
+    network_diagnostics, build_network_from_edges, most_probable_explanation,
 };
+use crate::belief_network::VariableId;
 use crate::error::Result;
 use crate::state::NodeId;
 
@@ -28,9 +29,9 @@ impl YantrikDB {
         match Self::get_meta(&self.conn(), BELIEF_NETWORK_META_KEY)? {
             Some(json) => {
                 let mut net: BeliefNetwork = serde_json::from_str(&json).map_err(|e| {
-                    crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
-                        Box::new(e),
-                    ))
+                    crate::error::YantrikDbError::Database(
+                        rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
+                    )
                 })?;
                 net.rebuild_indices();
                 Ok(net)
@@ -42,9 +43,9 @@ impl YantrikDB {
     /// Persist the belief network.
     pub fn save_belief_network(&self, network: &BeliefNetwork) -> Result<()> {
         let json = serde_json::to_string(network).map_err(|e| {
-            crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
-                Box::new(e),
-            ))
+            crate::error::YantrikDbError::Database(
+                rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
+            )
         })?;
         self.conn().execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
@@ -57,9 +58,9 @@ impl YantrikDB {
     pub fn load_bp_config(&self) -> Result<BPConfig> {
         match Self::get_meta(&self.conn(), BP_CONFIG_META_KEY)? {
             Some(json) => serde_json::from_str(&json).map_err(|e| {
-                crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
-                    Box::new(e),
-                ))
+                crate::error::YantrikDbError::Database(
+                    rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
+                )
             }),
             None => Ok(BPConfig::default()),
         }
@@ -68,9 +69,9 @@ impl YantrikDB {
     /// Persist belief-propagation configuration.
     pub fn save_bp_config(&self, config: &BPConfig) -> Result<()> {
         let json = serde_json::to_string(config).map_err(|e| {
-            crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
-                Box::new(e),
-            ))
+            crate::error::YantrikDbError::Database(
+                rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
+            )
         })?;
         self.conn().execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
@@ -118,14 +119,20 @@ impl YantrikDB {
     }
 
     /// Rank all variables by their sensitivity (impact on `target`).
-    pub fn belief_sensitivity(&self, target: VariableId) -> Result<Vec<(VariableId, f64)>> {
+    pub fn belief_sensitivity(
+        &self,
+        target: VariableId,
+    ) -> Result<Vec<(VariableId, f64)>> {
         let mut network = self.load_belief_network()?;
         let config = self.load_bp_config()?;
         Ok(sensitivity_to_evidence(&mut network, target, &config))
     }
 
     /// Most probable explanation for given evidence.
-    pub fn belief_mpe(&self, evidence: &[(VariableId, f64)]) -> Result<Vec<(VariableId, f64)>> {
+    pub fn belief_mpe(
+        &self,
+        evidence: &[(VariableId, f64)],
+    ) -> Result<Vec<(VariableId, f64)>> {
         let mut network = self.load_belief_network()?;
         let config = self.load_bp_config()?;
         Ok(most_probable_explanation(&mut network, evidence, &config))
@@ -154,8 +161,8 @@ impl YantrikDB {
 
 #[cfg(test)]
 mod tests {
-    use crate::belief_network::BPConfig;
     use crate::engine::YantrikDB;
+    use crate::belief_network::BPConfig;
 
     fn test_db() -> YantrikDB {
         YantrikDB::new(":memory:", 8).unwrap()

@@ -4,9 +4,10 @@
 //! and integration with the cognitive pipeline.
 
 use crate::analogy::{
-    analogy_strength_decay, detect_analogical_opportunities, find_analogies, transfer_strategy,
-    AnalogicalOpportunity, AnalogicalQuery, AnalogyMaintenanceReport, AnalogyStore,
+    AnalogyStore, AnalogicalQuery, AnalogicalOpportunity, AnalogyMaintenanceReport,
     StructuralMapping, SubgraphGroup, TransferredStrategy,
+    analogy_strength_decay, detect_analogical_opportunities, find_analogies,
+    transfer_strategy,
 };
 use crate::error::Result;
 use crate::state::CognitiveNode;
@@ -22,9 +23,9 @@ impl YantrikDB {
     pub fn load_analogy_store(&self) -> Result<AnalogyStore> {
         match Self::get_meta(&self.conn(), ANALOGY_STORE_META_KEY)? {
             Some(json) => serde_json::from_str(&json).map_err(|e| {
-                crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
-                    Box::new(e),
-                ))
+                crate::error::YantrikDbError::Database(
+                    rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
+                )
             }),
             None => Ok(AnalogyStore::default()),
         }
@@ -33,9 +34,9 @@ impl YantrikDB {
     /// Persist the analogy store.
     pub fn save_analogy_store(&self, store: &AnalogyStore) -> Result<()> {
         let json = serde_json::to_string(store).map_err(|e| {
-            crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
-                Box::new(e),
-            ))
+            crate::error::YantrikDbError::Database(
+                rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
+            )
         })?;
         self.conn().execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
@@ -64,12 +65,7 @@ impl YantrikDB {
         groups: &[SubgraphGroup],
         min_quality: f64,
     ) -> Result<Vec<AnalogicalOpportunity>> {
-        Ok(detect_analogical_opportunities(
-            recent_nodes,
-            recent_edges,
-            groups,
-            min_quality,
-        ))
+        Ok(detect_analogical_opportunities(recent_nodes, recent_edges, groups, min_quality))
     }
 
     /// Transfer strategies from source schemas via an analogy mapping.

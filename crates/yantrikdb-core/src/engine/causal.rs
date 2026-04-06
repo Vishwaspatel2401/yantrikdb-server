@@ -6,8 +6,8 @@
 use crate::causal::{
     apply_granger_evidence, causal_summary, discover_local_causality, estimate_effect,
     explain_causal_edge, predict_effects, record_intervention, what_if, CausalConfig,
-    CausalExplanation, CausalNode, CausalStore, CausalSummary, DiscoveryReport, EffectEstimate,
-    GrangerResult, PredictedEffect, WhatIfResult,
+    CausalExplanation, CausalNode, CausalStore, CausalSummary, DiscoveryReport,
+    EffectEstimate, GrangerResult, PredictedEffect, WhatIfResult,
 };
 use crate::error::Result;
 use crate::world_model::{ActionKind, StateFeatures};
@@ -27,9 +27,9 @@ impl YantrikDB {
         match Self::get_meta(&self.conn(), CAUSAL_STORE_META_KEY)? {
             Some(json) => {
                 let mut store: CausalStore = serde_json::from_str(&json).map_err(|e| {
-                    crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
-                        Box::new(e),
-                    ))
+                    crate::error::YantrikDbError::Database(
+                        rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
+                    )
                 })?;
                 // Rebuild runtime indices after deserialization.
                 store.rebuild_indices();
@@ -52,9 +52,9 @@ impl YantrikDB {
     /// Persist the causal store.
     pub fn save_causal_store(&self, store: &CausalStore) -> Result<()> {
         let json = serde_json::to_string(store).map_err(|e| {
-            crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
-                Box::new(e),
-            ))
+            crate::error::YantrikDbError::Database(
+                rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
+            )
         })?;
         self.conn().execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
@@ -67,9 +67,9 @@ impl YantrikDB {
     pub fn load_causal_config(&self) -> Result<CausalConfig> {
         match Self::get_meta(&self.conn(), CAUSAL_CONFIG_META_KEY)? {
             Some(json) => serde_json::from_str(&json).map_err(|e| {
-                crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
-                    Box::new(e),
-                ))
+                crate::error::YantrikDbError::Database(
+                    rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
+                )
             }),
             None => Ok(CausalConfig::default()),
         }
@@ -78,9 +78,9 @@ impl YantrikDB {
     /// Persist the causal configuration.
     pub fn save_causal_config(&self, config: &CausalConfig) -> Result<()> {
         let json = serde_json::to_string(config).map_err(|e| {
-            crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
-                Box::new(e),
-            ))
+            crate::error::YantrikDbError::Database(
+                rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
+            )
         })?;
         self.conn().execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
@@ -157,13 +157,7 @@ impl YantrikDB {
     ) -> Result<WhatIfResult> {
         let store = self.load_causal_store()?;
         let transition_model = self.load_transition_model()?;
-        Ok(what_if(
-            &store,
-            &transition_model,
-            cause,
-            context,
-            max_depth,
-        ))
+        Ok(what_if(&store, &transition_model, cause, context, max_depth))
     }
 
     /// Explain a specific causal edge in detail.
@@ -305,14 +299,10 @@ mod tests {
         let effect = CausalNode::Event(EventKind::ToolCallCompleted);
 
         // 3 successes, 1 failure.
-        db.record_causal_intervention(ActionKind::ExecuteTool, effect.clone(), true)
-            .unwrap();
-        db.record_causal_intervention(ActionKind::ExecuteTool, effect.clone(), true)
-            .unwrap();
-        db.record_causal_intervention(ActionKind::ExecuteTool, effect.clone(), true)
-            .unwrap();
-        db.record_causal_intervention(ActionKind::ExecuteTool, effect.clone(), false)
-            .unwrap();
+        db.record_causal_intervention(ActionKind::ExecuteTool, effect.clone(), true).unwrap();
+        db.record_causal_intervention(ActionKind::ExecuteTool, effect.clone(), true).unwrap();
+        db.record_causal_intervention(ActionKind::ExecuteTool, effect.clone(), true).unwrap();
+        db.record_causal_intervention(ActionKind::ExecuteTool, effect.clone(), false).unwrap();
 
         let store = db.load_causal_store().unwrap();
         let edge = store.find_edge(&cause, &effect).unwrap();
@@ -328,10 +318,7 @@ mod tests {
         let effect = CausalNode::Event(EventKind::SuggestionAccepted);
 
         // No edge yet.
-        assert!(db
-            .estimate_causal_effect(&cause, &effect)
-            .unwrap()
-            .is_none());
+        assert!(db.estimate_causal_effect(&cause, &effect).unwrap().is_none());
 
         // Create edge via intervention.
         db.record_causal_intervention(ActionKind::SurfaceSuggestion, effect.clone(), true)
@@ -363,8 +350,7 @@ mod tests {
         let cause = CausalNode::Action(ActionKind::ExecuteTool);
         let effect = CausalNode::Event(EventKind::ToolCallCompleted);
 
-        db.record_causal_intervention(ActionKind::ExecuteTool, effect.clone(), true)
-            .unwrap();
+        db.record_causal_intervention(ActionKind::ExecuteTool, effect.clone(), true).unwrap();
 
         let explanation = db.explain_causal_edge(&cause, &effect).unwrap();
         assert!(explanation.is_some());

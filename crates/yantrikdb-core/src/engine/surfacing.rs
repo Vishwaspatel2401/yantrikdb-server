@@ -6,8 +6,9 @@
 use crate::error::Result;
 use crate::receptivity::ContextSnapshot;
 use crate::surfacing::{
-    run_surfacing_pipeline, run_surfacing_with_preferences, SurfaceMode, SurfaceOutcome,
-    SurfaceRateLimiter, SurfacingConfig, SurfacingPreferences, SurfacingResult,
+    run_surfacing_pipeline, run_surfacing_with_preferences,
+    SurfaceMode, SurfaceOutcome, SurfaceRateLimiter,
+    SurfacingConfig, SurfacingPreferences, SurfacingResult,
 };
 
 use super::{now, YantrikDB};
@@ -26,9 +27,9 @@ impl YantrikDB {
     pub fn load_surfacing_preferences(&self) -> Result<SurfacingPreferences> {
         match Self::get_meta(&self.conn(), SURFACING_PREFS_META_KEY)? {
             Some(json) => serde_json::from_str(&json).map_err(|e| {
-                crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
-                    Box::new(e),
-                ))
+                crate::error::YantrikDbError::Database(
+                    rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
+                )
             }),
             None => Ok(SurfacingPreferences::new()),
         }
@@ -37,9 +38,9 @@ impl YantrikDB {
     /// Persist surfacing preferences.
     pub fn save_surfacing_preferences(&self, prefs: &SurfacingPreferences) -> Result<()> {
         let json = serde_json::to_string(prefs).map_err(|e| {
-            crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
-                Box::new(e),
-            ))
+            crate::error::YantrikDbError::Database(
+                rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
+            )
         })?;
         self.conn().execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
@@ -52,9 +53,9 @@ impl YantrikDB {
     pub fn load_surface_rate_limiter(&self) -> Result<SurfaceRateLimiter> {
         match Self::get_meta(&self.conn(), SURFACING_RATE_META_KEY)? {
             Some(json) => serde_json::from_str(&json).map_err(|e| {
-                crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
-                    Box::new(e),
-                ))
+                crate::error::YantrikDbError::Database(
+                    rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
+                )
             }),
             None => Ok(SurfaceRateLimiter::new()),
         }
@@ -63,9 +64,9 @@ impl YantrikDB {
     /// Persist the rate limiter state.
     pub fn save_surface_rate_limiter(&self, limiter: &SurfaceRateLimiter) -> Result<()> {
         let json = serde_json::to_string(limiter).map_err(|e| {
-            crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
-                Box::new(e),
-            ))
+            crate::error::YantrikDbError::Database(
+                rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
+            )
         })?;
         self.conn().execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
@@ -78,9 +79,9 @@ impl YantrikDB {
     pub fn load_surfacing_config(&self) -> Result<SurfacingConfig> {
         match Self::get_meta(&self.conn(), SURFACING_CONFIG_META_KEY)? {
             Some(json) => serde_json::from_str(&json).map_err(|e| {
-                crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
-                    Box::new(e),
-                ))
+                crate::error::YantrikDbError::Database(
+                    rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
+                )
             }),
             None => Ok(SurfacingConfig::default()),
         }
@@ -89,9 +90,9 @@ impl YantrikDB {
     /// Persist surfacing configuration.
     pub fn save_surfacing_config(&self, config: &SurfacingConfig) -> Result<()> {
         let json = serde_json::to_string(config).map_err(|e| {
-            crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
-                Box::new(e),
-            ))
+            crate::error::YantrikDbError::Database(
+                rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
+            )
         })?;
         self.conn().execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
@@ -174,12 +175,7 @@ impl YantrikDB {
         let items: Vec<_> = active_items.into_iter().cloned().collect();
 
         Ok(run_surfacing_pipeline(
-            &items,
-            ts,
-            &receptivity,
-            &rate_limiter,
-            context,
-            &config,
+            &items, ts, &receptivity, &rate_limiter, context, &config,
         ))
     }
 
@@ -314,8 +310,7 @@ mod tests {
             UrgencyFn::Constant { value: 0.85 },
             None,
             "Submit report by EOD".to_string(),
-        )
-        .unwrap();
+        ).unwrap();
 
         let ctx = test_context();
         let result = db.get_proactive_suggestions(&ctx, 5).unwrap();
@@ -331,15 +326,13 @@ mod tests {
     fn test_surfacing_feedback_resolves() {
         let db = test_db();
 
-        let id = db
-            .agenda_add(
-                NodeId::NIL,
-                AgendaKind::FollowUpNeeded,
-                UrgencyFn::Constant { value: 0.7 },
-                None,
-                "Follow up".to_string(),
-            )
-            .unwrap();
+        let id = db.agenda_add(
+            NodeId::NIL,
+            AgendaKind::FollowUpNeeded,
+            UrgencyFn::Constant { value: 0.7 },
+            None,
+            "Follow up".to_string(),
+        ).unwrap();
 
         let ctx = test_context();
         db.surfacing_feedback(
@@ -347,8 +340,7 @@ mod tests {
             crate::surfacing::SurfaceMode::Nudge,
             SurfaceOutcome::Acted,
             &ctx,
-        )
-        .unwrap();
+        ).unwrap();
 
         // Item should be resolved
         let agenda = db.load_agenda().unwrap();
@@ -359,15 +351,13 @@ mod tests {
     fn test_surfacing_feedback_dismisses() {
         let db = test_db();
 
-        let id = db
-            .agenda_add(
-                NodeId::NIL,
-                AgendaKind::RoutineWindowOpening,
-                UrgencyFn::Constant { value: 0.5 },
-                None,
-                "Check email".to_string(),
-            )
-            .unwrap();
+        let id = db.agenda_add(
+            NodeId::NIL,
+            AgendaKind::RoutineWindowOpening,
+            UrgencyFn::Constant { value: 0.5 },
+            None,
+            "Check email".to_string(),
+        ).unwrap();
 
         let ctx = test_context();
         db.surfacing_feedback(
@@ -375,8 +365,7 @@ mod tests {
             crate::surfacing::SurfaceMode::Whisper,
             SurfaceOutcome::Dismissed,
             &ctx,
-        )
-        .unwrap();
+        ).unwrap();
 
         // Item should be dismissed
         let agenda = db.load_agenda().unwrap();

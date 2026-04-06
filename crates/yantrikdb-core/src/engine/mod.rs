@@ -1,73 +1,74 @@
-mod action;
-mod agenda;
-mod analogy_engine;
 mod belief;
-mod belief_network_engine;
 mod cache;
+mod intent;
+mod action;
+mod evaluator;
+mod policy;
+mod suggest;
+mod agenda;
+mod temporal;
+mod hawkes;
+mod receptivity;
+mod tick;
+mod surfacing;
+mod observer;
+mod flywheel;
+mod world_model;
+mod experimenter;
+mod skills;
+mod extractor;
 mod calibration;
+mod introspection;
 mod causal;
+mod planner;
 mod cognition;
 mod coherence;
+mod metacognition;
+mod personality_bias;
+mod query_dsl;
 mod conflict;
+mod analogy_engine;
+mod schema_induction_engine;
+mod narrative_engine;
 mod counterfactual_engine;
-mod evaluator;
-mod experimenter;
-mod extractor;
+mod belief_network_engine;
+mod replay_engine;
+mod perspective_engine;
 mod feedback;
-mod flywheel;
-mod graph_ops;
 pub mod graph_state;
-mod hawkes;
+mod graph_ops;
 mod indices;
-mod intent;
-mod introspection;
 mod learning;
 mod lifecycle;
-mod metacognition;
-mod narrative_engine;
-mod observer;
-mod personality_bias;
-mod perspective_engine;
-mod planner;
-mod policy;
-mod procedural;
-mod query_dsl;
 mod recall;
-mod receptivity;
 mod record;
-mod replay_engine;
-mod schema_induction_engine;
+mod procedural;
 mod session;
-mod skills;
 mod stats;
 mod storage;
-mod suggest;
-mod surfacing;
-mod temporal;
 mod temporal_helpers;
 pub mod tenant;
 #[cfg(test)]
 mod tests;
-mod tick;
-mod world_model;
 
 use std::collections::HashMap;
-use std::sync::{Mutex, MutexGuard, RwLock};
+use std::sync::{Mutex, RwLock, MutexGuard};
 
 use base64::Engine;
 use rand::Rng;
 use rusqlite::{params, Connection};
 
 use crate::encryption::{self, EncryptionProvider};
-use crate::error::{Result, YantrikDbError};
+use crate::error::{YantrikDbError, Result};
 use crate::graph_index::GraphIndex;
 use crate::hlc::{HLCTimestamp, HLC};
 use crate::hnsw::HnswIndex;
 use crate::schema::{
-    MIGRATE_V10_TO_V11, MIGRATE_V11_TO_V12, MIGRATE_V12_TO_V13, MIGRATE_V13_TO_V14,
-    MIGRATE_V1_TO_V2, MIGRATE_V2_TO_V3, MIGRATE_V3_TO_V4, MIGRATE_V4_TO_V5, MIGRATE_V5_TO_V6,
-    MIGRATE_V6_TO_V7, MIGRATE_V7_TO_V8, MIGRATE_V8_TO_V9, MIGRATE_V9_TO_V10, SCHEMA_SQL,
-    SCHEMA_VERSION,
+    MIGRATE_V1_TO_V2, MIGRATE_V2_TO_V3, MIGRATE_V3_TO_V4, MIGRATE_V4_TO_V5,
+    MIGRATE_V5_TO_V6, MIGRATE_V6_TO_V7, MIGRATE_V7_TO_V8, MIGRATE_V8_TO_V9,
+    MIGRATE_V9_TO_V10, MIGRATE_V10_TO_V11, MIGRATE_V11_TO_V12, MIGRATE_V12_TO_V13,
+    MIGRATE_V13_TO_V14,
+    SCHEMA_SQL, SCHEMA_VERSION,
 };
 use crate::types::*;
 
@@ -139,11 +140,7 @@ impl YantrikDB {
     /// The 32-byte `master_key` is used to wrap/unwrap a per-database Data Encryption Key (DEK).
     /// All text, metadata, and embedding fields are encrypted at rest using AES-256-GCM.
     /// In-memory indexes operate on plaintext for full query performance.
-    pub fn new_encrypted(
-        db_path: &str,
-        embedding_dim: usize,
-        master_key: &[u8; 32],
-    ) -> Result<Self> {
+    pub fn new_encrypted(db_path: &str, embedding_dim: usize, master_key: &[u8; 32]) -> Result<Self> {
         Self::open(db_path, embedding_dim, None, Some(master_key))
     }
 
@@ -305,9 +302,9 @@ impl YantrikDB {
     fn load_active_sessions(conn: &Connection) -> Result<HashMap<String, String>> {
         let mut map = HashMap::new();
         // Table may not exist yet during initial schema creation
-        let mut stmt = match conn
-            .prepare("SELECT namespace, session_id FROM sessions WHERE status = 'active'")
-        {
+        let mut stmt = match conn.prepare(
+            "SELECT namespace, session_id FROM sessions WHERE status = 'active'",
+        ) {
             Ok(s) => s,
             Err(_) => return Ok(map),
         };
@@ -469,7 +466,11 @@ impl YantrikDB {
     }
 
     /// Recall memories by text query with automatic embedding.
-    pub fn recall_text(&self, query: &str, top_k: usize) -> Result<Vec<RecallResult>> {
+    pub fn recall_text(
+        &self,
+        query: &str,
+        top_k: usize,
+    ) -> Result<Vec<RecallResult>> {
         let embedding = self.embed(query)?;
         self.recall(
             &embedding,

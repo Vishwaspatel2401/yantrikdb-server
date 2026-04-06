@@ -33,10 +33,7 @@ impl YantrikDB {
         )?);
         all_triggers.extend(crate::triggers::check_conflict_escalation(self)?);
         all_triggers.extend(crate::triggers::check_temporal_drift(self)?);
-        all_triggers.extend(crate::triggers::check_redundancy(
-            self,
-            config.consolidation_sim_threshold,
-        )?);
+        all_triggers.extend(crate::triggers::check_redundancy(self, config.consolidation_sim_threshold)?);
         all_triggers.extend(crate::triggers::check_relationship_insight(self)?);
         all_triggers.extend(crate::triggers::check_valence_trend(self)?);
         all_triggers.extend(crate::triggers::check_entity_anomaly(self)?);
@@ -103,10 +100,7 @@ impl YantrikDB {
             let new_patterns = crate::patterns::get_patterns(self, None, Some("active"), 10)?;
             for p in new_patterns {
                 let mut context = std::collections::HashMap::new();
-                context.insert(
-                    "pattern_type".to_string(),
-                    serde_json::json!(p.pattern_type),
-                );
+                context.insert("pattern_type".to_string(), serde_json::json!(p.pattern_type));
                 context.insert("confidence".to_string(), serde_json::json!(p.confidence));
                 context.insert("description".to_string(), serde_json::json!(p.description));
 
@@ -137,7 +131,11 @@ impl YantrikDB {
                             "explore_entity_bridge",
                         )
                     }
-                    _ => (p.confidence * 0.5, "pattern_discovered", "explore_pattern"),
+                    _ => (
+                        p.confidence * 0.5,
+                        "pattern_discovered",
+                        "explore_pattern",
+                    ),
                 };
 
                 // Add session context if available
@@ -170,25 +168,19 @@ impl YantrikDB {
                  FROM sessions WHERE status = 'ended' \
                  ORDER BY ended_at DESC LIMIT 1",
             )?;
-            if let Ok((
-                session_id,
-                client_id,
-                ended_at,
-                summary,
-                avg_valence,
-                memory_count,
-                topics_json,
-            )) = session_stmt.query_row([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, f64>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                    row.get::<_, Option<f64>>(4)?,
-                    row.get::<_, i64>(5)?,
-                    row.get::<_, String>(6)?,
-                ))
-            }) {
+            if let Ok((session_id, client_id, ended_at, summary, avg_valence, memory_count, topics_json)) =
+                session_stmt.query_row([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, f64>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, Option<f64>>(4)?,
+                        row.get::<_, i64>(5)?,
+                        row.get::<_, String>(6)?,
+                    ))
+                })
+            {
                 let gap_hours = (ts - ended_at) / 3600.0;
                 let topics: Vec<String> = serde_json::from_str(&topics_json).unwrap_or_default();
 
@@ -198,10 +190,7 @@ impl YantrikDB {
                     context.insert("last_session_id".to_string(), serde_json::json!(session_id));
                     context.insert("client_id".to_string(), serde_json::json!(client_id));
                     context.insert("gap_hours".to_string(), serde_json::json!(gap_hours));
-                    context.insert(
-                        "last_session_memory_count".to_string(),
-                        serde_json::json!(memory_count),
-                    );
+                    context.insert("last_session_memory_count".to_string(), serde_json::json!(memory_count));
                     context.insert("last_session_topics".to_string(), serde_json::json!(topics));
                     if let Some(ref s) = summary {
                         context.insert("last_session_summary".to_string(), serde_json::json!(s));
@@ -210,13 +199,7 @@ impl YantrikDB {
                         context.insert("last_session_valence".to_string(), serde_json::json!(v));
                     }
 
-                    let urgency = if gap_hours > 72.0 {
-                        0.7
-                    } else if gap_hours > 24.0 {
-                        0.5
-                    } else {
-                        0.3
-                    };
+                    let urgency = if gap_hours > 72.0 { 0.7 } else if gap_hours > 24.0 { 0.5 } else { 0.3 };
                     let reason = if gap_hours > 24.0 {
                         format!(
                             "It's been {:.0} hours since your last session. Last time: {} memories stored{}.",
@@ -230,15 +213,7 @@ impl YantrikDB {
                             gap_hours,
                             memory_count,
                             if !topics.is_empty() {
-                                format!(
-                                    " about {}",
-                                    topics
-                                        .iter()
-                                        .take(3)
-                                        .cloned()
-                                        .collect::<Vec<_>>()
-                                        .join(", ")
-                                )
+                                format!(" about {}", topics.iter().take(3).cloned().collect::<Vec<_>>().join(", "))
                             } else {
                                 String::new()
                             },
@@ -333,7 +308,7 @@ impl YantrikDB {
                AND m.source IN ('seed', 'user_confirmed')
              GROUP BY c.id
              HAVING confirmed_count >= 3
-               AND SUM(CASE WHEN m.source != 'seed' THEN 1 ELSE 0 END) >= 1",
+               AND SUM(CASE WHEN m.source != 'seed' THEN 1 ELSE 0 END) >= 1"
         )?;
 
         let candidates: Vec<(String, String, i64, String)> = stmt
@@ -353,20 +328,21 @@ impl YantrikDB {
             let cooldown_key = format!("gossip_{}", cat_name);
 
             // Check cooldown
-            let recent: bool = conn
-                .query_row(
-                    "SELECT COUNT(*) > 0 FROM trigger_log
+            let recent: bool = conn.query_row(
+                "SELECT COUNT(*) > 0 FROM trigger_log
                  WHERE cooldown_key = ?1 AND created_at > ?2",
-                    params![cooldown_key, crate::time::now_secs() - cooldown_secs],
-                    |row| row.get(0),
-                )
-                .unwrap_or(false);
+                params![cooldown_key, crate::time::now_secs() - cooldown_secs],
+                |row| row.get(0),
+            ).unwrap_or(false);
 
             if recent {
                 continue;
             }
 
-            let members: Vec<String> = member_list.split(", ").map(|s| s.to_string()).collect();
+            let members: Vec<String> = member_list
+                .split(", ")
+                .map(|s| s.to_string())
+                .collect();
 
             let mut context = std::collections::HashMap::new();
             context.insert("category_id".to_string(), serde_json::json!(cat_id));
@@ -378,8 +354,7 @@ impl YantrikDB {
                 urgency: 0.3,
                 reason: format!(
                     "Category '{}' has {} confirmed members and is ready for vocabulary expansion",
-                    cat_name,
-                    members.len()
+                    cat_name, members.len()
                 ),
                 suggested_action: format!(
                     "Ask LLM to suggest additional members for the '{}' category",

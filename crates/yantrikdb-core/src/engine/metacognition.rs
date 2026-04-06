@@ -6,9 +6,10 @@
 use crate::attention::AttentionConfig;
 use crate::error::Result;
 use crate::metacognition::{
-    confidence_report, metacognitive_assessment, reasoning_health, should_abstain, AbstainDecision,
-    ConfidenceReport, MetaActionCandidate, MetaCognitiveConfig, MetaCognitiveHistory,
-    MetaCognitiveInputs, MetaCognitiveReport, ReasoningHealthReport,
+    confidence_report, metacognitive_assessment, reasoning_health, should_abstain,
+    AbstainDecision, ConfidenceReport, MetaActionCandidate, MetaCognitiveConfig,
+    MetaCognitiveHistory, MetaCognitiveInputs, MetaCognitiveReport,
+    ReasoningHealthReport,
 };
 
 use super::{now, YantrikDB};
@@ -28,9 +29,9 @@ impl YantrikDB {
     pub fn load_metacognitive_config(&self) -> Result<MetaCognitiveConfig> {
         match Self::get_meta(&self.conn(), METACOG_CONFIG_META_KEY)? {
             Some(json) => serde_json::from_str(&json).map_err(|e| {
-                crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
-                    Box::new(e),
-                ))
+                crate::error::YantrikDbError::Database(
+                    rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
+                )
             }),
             None => Ok(MetaCognitiveConfig::default()),
         }
@@ -39,9 +40,9 @@ impl YantrikDB {
     /// Persist the meta-cognitive config.
     pub fn save_metacognitive_config(&self, config: &MetaCognitiveConfig) -> Result<()> {
         let json = serde_json::to_string(config).map_err(|e| {
-            crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
-                Box::new(e),
-            ))
+            crate::error::YantrikDbError::Database(
+                rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
+            )
         })?;
         self.conn().execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
@@ -54,9 +55,9 @@ impl YantrikDB {
     pub fn load_metacognitive_history(&self) -> Result<MetaCognitiveHistory> {
         match Self::get_meta(&self.conn(), METACOG_HISTORY_META_KEY)? {
             Some(json) => serde_json::from_str(&json).map_err(|e| {
-                crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
-                    Box::new(e),
-                ))
+                crate::error::YantrikDbError::Database(
+                    rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
+                )
             }),
             None => Ok(MetaCognitiveHistory::new(DEFAULT_MAX_SNAPSHOTS)),
         }
@@ -65,9 +66,9 @@ impl YantrikDB {
     /// Persist the meta-cognitive history.
     pub fn save_metacognitive_history(&self, history: &MetaCognitiveHistory) -> Result<()> {
         let json = serde_json::to_string(history).map_err(|e| {
-            crate::error::YantrikDbError::Database(rusqlite::Error::ToSqlConversionFailure(
-                Box::new(e),
-            ))
+            crate::error::YantrikDbError::Database(
+                rusqlite::Error::ToSqlConversionFailure(Box::new(e)),
+            )
         })?;
         self.conn().execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
@@ -285,20 +286,24 @@ mod tests {
         let db = test_db();
 
         // With high-confidence candidates → should proceed.
-        let candidates = vec![MetaActionCandidate {
-            description: "Send reminder".to_string(),
-            confidence: 0.85,
-        }];
+        let candidates = vec![
+            MetaActionCandidate {
+                description: "Send reminder".to_string(),
+                confidence: 0.85,
+            },
+        ];
         let (report, decision) = db.should_abstain(&candidates).unwrap();
         // May or may not proceed depending on system state, but should not panic.
         assert!(report.overall_confidence >= 0.0);
         assert!(report.overall_confidence <= 1.0);
 
         // With very low candidates.
-        let low_candidates = vec![MetaActionCandidate {
-            description: "Risky".to_string(),
-            confidence: 0.1,
-        }];
+        let low_candidates = vec![
+            MetaActionCandidate {
+                description: "Risky".to_string(),
+                confidence: 0.1,
+            },
+        ];
         let (_, decision2) = db.should_abstain(&low_candidates).unwrap();
         // Should at least warn about low candidate confidence.
         assert_ne!(decision2.action, AbstainAction::Proceed);

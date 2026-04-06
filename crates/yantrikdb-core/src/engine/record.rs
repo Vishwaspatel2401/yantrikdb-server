@@ -4,7 +4,7 @@ use crate::error::Result;
 use crate::serde_helpers::serialize_f32;
 use crate::types::*;
 
-use super::{embedding_hash, now, YantrikDB};
+use super::{now, embedding_hash, YantrikDB};
 
 impl YantrikDB {
     /// Store a new memory and return its RID.
@@ -46,24 +46,8 @@ impl YantrikDB {
                   half_life, last_access, valence, metadata, namespace, \
                   certainty, domain, source, emotional_state) \
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
-                params![
-                    rid,
-                    memory_type,
-                    stored_text,
-                    stored_emb,
-                    ts,
-                    ts,
-                    importance,
-                    half_life,
-                    ts,
-                    valence,
-                    stored_meta,
-                    namespace,
-                    certainty,
-                    domain,
-                    source,
-                    emotional_state
-                ],
+                params![rid, memory_type, stored_text, stored_emb, ts, ts, importance, half_life, ts, valence, stored_meta, namespace,
+                        certainty, domain, source, emotional_state],
             )?;
 
             // Auto-link to active session for this namespace
@@ -84,24 +68,21 @@ impl YantrikDB {
         self.vec_index.write().unwrap().insert(&rid, embedding)?;
 
         // Insert into scoring cache (conn and vec_index dropped)
-        self.cache_insert(
-            rid.clone(),
-            ScoringRow {
-                created_at: ts,
-                importance,
-                half_life,
-                last_access: ts,
-                access_count: 0,
-                valence,
-                consolidation_status: "active".to_string(),
-                memory_type: memory_type.to_string(),
-                namespace: namespace.to_string(),
-                certainty,
-                domain: domain.to_string(),
-                source: source.to_string(),
-                emotional_state: emotional_state.map(|s| s.to_string()),
-            },
-        );
+        self.cache_insert(rid.clone(), ScoringRow {
+            created_at: ts,
+            importance,
+            half_life,
+            last_access: ts,
+            access_count: 0,
+            valence,
+            consolidation_status: "active".to_string(),
+            memory_type: memory_type.to_string(),
+            namespace: namespace.to_string(),
+            certainty,
+            domain: domain.to_string(),
+            source: source.to_string(),
+            emotional_state: emotional_state.map(|s| s.to_string()),
+        });
 
         // Auto-link memory to known entities (populates memory_entities for graph recall)
         {
@@ -237,24 +218,21 @@ impl YantrikDB {
             let mut cache = self.scoring_cache.write().unwrap();
             for (rid, input) in rids.iter().zip(inputs.iter()) {
                 let ts = now();
-                cache.insert(
-                    rid.clone(),
-                    ScoringRow {
-                        created_at: ts,
-                        importance: input.importance,
-                        half_life: input.half_life,
-                        last_access: ts,
-                        access_count: 0,
-                        valence: input.valence,
-                        consolidation_status: "active".to_string(),
-                        memory_type: input.memory_type.clone(),
-                        namespace: input.namespace.clone(),
-                        certainty: input.certainty,
-                        domain: input.domain.clone(),
-                        source: input.source.clone(),
-                        emotional_state: input.emotional_state.clone(),
-                    },
-                );
+                cache.insert(rid.clone(), ScoringRow {
+                    created_at: ts,
+                    importance: input.importance,
+                    half_life: input.half_life,
+                    last_access: ts,
+                    access_count: 0,
+                    valence: input.valence,
+                    consolidation_status: "active".to_string(),
+                    memory_type: input.memory_type.clone(),
+                    namespace: input.namespace.clone(),
+                    certainty: input.certainty,
+                    domain: input.domain.clone(),
+                    source: input.source.clone(),
+                    emotional_state: input.emotional_state.clone(),
+                });
             }
         }
 

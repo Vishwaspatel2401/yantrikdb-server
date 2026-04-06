@@ -108,7 +108,11 @@ impl Distribution {
             Self::Gaussian { mean, .. } => *mean,
             Self::Categorical { probs } => {
                 // Expected value using index as value.
-                probs.iter().enumerate().map(|(i, p)| i as f64 * p).sum()
+                probs
+                    .iter()
+                    .enumerate()
+                    .map(|(i, p)| i as f64 * p)
+                    .sum()
             }
         }
     }
@@ -140,8 +144,7 @@ impl Distribution {
         match self {
             Self::Beta { alpha, beta } => {
                 let sum = alpha + beta;
-                ln_beta(*alpha, *beta)
-                    - (alpha - 1.0) * digamma(*alpha)
+                ln_beta(*alpha, *beta) - (alpha - 1.0) * digamma(*alpha)
                     - (beta - 1.0) * digamma(*beta)
                     + (sum - 2.0) * digamma(sum)
             }
@@ -189,7 +192,9 @@ impl Distribution {
                     mean: m2,
                     variance: v2,
                 },
-            ) => 0.5 * ((v1 / v2).ln() + (v2 + (m1 - m2).powi(2)) / v1 - 1.0),
+            ) => {
+                0.5 * ((v1 / v2).ln() + (v2 + (m1 - m2).powi(2)) / v1 - 1.0)
+            }
             (Self::Categorical { probs: p1 }, Self::Categorical { probs: p2 }) => {
                 if p1.len() != p2.len() {
                     return f64::INFINITY;
@@ -421,7 +426,8 @@ impl BeliefNetwork {
                 .or_default()
                 .push(factor_idx);
         }
-        self.factor_to_vars.insert(id, variables.clone());
+        self.factor_to_vars
+            .insert(id, variables.clone());
 
         self.factors.push(Factor {
             id,
@@ -439,7 +445,10 @@ impl BeliefNetwork {
         self.factor_to_vars.clear();
         for (idx, factor) in self.factors.iter().enumerate() {
             for &var_id in &factor.variables {
-                self.var_to_factors.entry(var_id).or_default().push(idx);
+                self.var_to_factors
+                    .entry(var_id)
+                    .or_default()
+                    .push(idx);
             }
             self.factor_to_vars
                 .insert(factor.id, factor.variables.clone());
@@ -535,7 +544,10 @@ pub struct BPResult {
 ///
 /// Uses sum-product message passing with damping for stability.
 /// Updates posteriors in-place on the network variables.
-pub fn loopy_belief_propagation(network: &mut BeliefNetwork, config: &BPConfig) -> BPResult {
+pub fn loopy_belief_propagation(
+    network: &mut BeliefNetwork,
+    config: &BPConfig,
+) -> BPResult {
     let var_ids: Vec<VariableId> = network.variables.iter().map(|v| v.id).collect();
     let n_vars = var_ids.len();
 
@@ -602,8 +614,11 @@ pub fn loopy_belief_propagation(network: &mut BeliefNetwork, config: &BPConfig) 
                     .collect();
 
                 // Compute new message based on potential function.
-                let new_msg =
-                    compute_factor_message(&factor.potential, factor.strength, &other_means);
+                let new_msg = compute_factor_message(
+                    &factor.potential,
+                    factor.strength,
+                    &other_means,
+                );
 
                 // Apply damping.
                 let old_msg = messages.get(&(fi, target_var)).copied().unwrap_or(0.5);
@@ -693,7 +708,8 @@ fn compute_factor_message(
             // P(child=1) = P(child=1|parent=1)*P(parent=1) + P(child=1|parent=0)*P(parent=0)
             let p_parent_high = avg_other;
             let p_parent_low = 1.0 - avg_other;
-            let p_child_high = table[1][1] * p_parent_high + table[0][1] * p_parent_low;
+            let p_child_high =
+                table[1][1] * p_parent_high + table[0][1] * p_parent_low;
             // Blend with strength (weaker = closer to 0.5).
             0.5 + strength * (p_child_high - 0.5)
         }
@@ -962,7 +978,10 @@ pub fn sensitivity_to_evidence(
         }
     }
 
-    results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    results.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     results
 }
@@ -1139,8 +1158,8 @@ pub fn build_network_from_edges(
                 FactorType::Causes,
                 PotentialFunction::Conditional {
                     table: [
-                        [1.0 - weight * 0.2, weight * 0.2], // parent=low
-                        [1.0 - weight * 0.8, weight * 0.8], // parent=high
+                        [1.0 - weight * 0.2, weight * 0.2],   // parent=low
+                        [1.0 - weight * 0.8, weight * 0.8],   // parent=high
                     ],
                 },
             ),
@@ -1158,7 +1177,12 @@ pub fn build_network_from_edges(
             ),
         };
 
-        network.add_factor(vec![from_var, to_var], factor_type, weight, potential);
+        network.add_factor(
+            vec![from_var, to_var],
+            factor_type,
+            weight,
+            potential,
+        );
     }
 
     network
@@ -1453,7 +1477,7 @@ mod tests {
         let bp_config = BPConfig::default();
 
         let q = InferenceQuery {
-            target: VariableId(2),                 // B
+            target: VariableId(2), // B
             evidence: vec![(VariableId(1), 0.95)], // observe A = very high
             query_type: InferenceType::Conditional,
         };
@@ -1550,11 +1574,7 @@ mod tests {
 
         assert_eq!(assignment.len(), 3);
         // A should be high, B should be high (supports), C should be low (contradicts B).
-        let a_val = assignment
-            .iter()
-            .find(|(id, _)| *id == VariableId(1))
-            .unwrap()
-            .1;
+        let a_val = assignment.iter().find(|(id, _)| *id == VariableId(1)).unwrap().1;
         assert!(a_val > 0.7);
     }
 
