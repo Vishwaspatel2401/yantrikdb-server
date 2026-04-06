@@ -39,10 +39,7 @@ pub async fn run_cluster_server(
     }
 }
 
-async fn handle_peer_connection(
-    stream: TcpStream,
-    ctx: Arc<ClusterContext>,
-) -> anyhow::Result<()> {
+async fn handle_peer_connection(stream: TcpStream, ctx: Arc<ClusterContext>) -> anyhow::Result<()> {
     let mut framed = Framed::new(stream, YantrikCodec::new());
 
     // Phase 1: handshake
@@ -75,11 +72,8 @@ async fn handle_peer_connection(
     }
 
     // Record peer in registry
-    ctx.peers.record_handshake(
-        &hello.advertise_addr,
-        hello.node_id,
-        hello.current_term,
-    );
+    ctx.peers
+        .record_handshake(&hello.advertise_addr, hello.node_id, hello.current_term);
 
     // Send hello-ok
     let resp = ClusterHelloOk {
@@ -149,6 +143,19 @@ async fn dispatch_cluster_op(
         OpCode::Heartbeat => {
             let hb: HeartbeatMsg = unpack(&frame.payload)?;
             ctx.state.record_heartbeat(hb.leader_id, hb.term)?;
+
+            // Mark leader's peer entry as reachable based on node_id match.
+            // (We don't have addr from heartbeat, so we look up by node_id.)
+            for peer in ctx.peers.snapshot() {
+                if peer.node_id == Some(hb.leader_id) {
+                    ctx.peers.update_oplog_position(
+                        &peer.addr,
+                        hb.leader_last_hlc.clone(),
+                        hb.leader_last_op_id.clone(),
+                    );
+                    break;
+                }
+            }
 
             let ack = HeartbeatAckMsg {
                 term: ctx.state.current_term(),

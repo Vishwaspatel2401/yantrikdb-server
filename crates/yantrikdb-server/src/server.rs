@@ -178,6 +178,29 @@ where
     let auth_req: AuthRequest = unpack(&frame.payload)?;
     let token_hash = auth::hash_token(&auth_req.token);
 
+    // Cluster master token: if clustering is enabled and the token matches
+    // the cluster_secret, accept it as access to the default database.
+    if let Some(ref cluster) = state.cluster {
+        if let Some(ref secret) = cluster.config.cluster_secret {
+            if &auth_req.token == secret {
+                // Look up the default database
+                let db_record = state
+                    .control
+                    .lock()
+                    .unwrap()
+                    .get_database("default")?
+                    .ok_or_else(|| anyhow::anyhow!("default database not found"))?;
+                let resp = AuthOkResponse {
+                    database: db_record.name.clone(),
+                    database_id: db_record.id,
+                };
+                let resp_frame = make_frame(OpCode::AuthOk, frame.stream_id, &resp)?;
+                framed.send(resp_frame).await?;
+                return Ok((db_record.id, db_record.name));
+            }
+        }
+    }
+
     // Scope the lock so MutexGuard is dropped before any .await
     let auth_result = {
         let control = state.control.lock().unwrap();

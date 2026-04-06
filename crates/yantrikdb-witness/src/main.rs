@@ -23,7 +23,11 @@ use yantrikdb_protocol::messages::*;
 use yantrikdb_protocol::*;
 
 #[derive(Parser)]
-#[command(name = "yantrikdb-witness", about = "YantrikDB cluster witness — vote-only daemon", version)]
+#[command(
+    name = "yantrikdb-witness",
+    about = "YantrikDB cluster witness — vote-only daemon",
+    version
+)]
 struct Cli {
     /// Witness node ID (must be unique in the cluster)
     #[arg(long)]
@@ -166,7 +170,11 @@ async fn handle_peer(stream: TcpStream, witness: std::sync::Arc<Witness>) -> any
         .ok_or_else(|| anyhow::anyhow!("connection closed before hello"))??;
 
     if frame.opcode != OpCode::ClusterHello {
-        let err = make_error(frame.stream_id, error_codes::INVALID_PAYLOAD, "expected ClusterHello")?;
+        let err = make_error(
+            frame.stream_id,
+            error_codes::INVALID_PAYLOAD,
+            "expected ClusterHello",
+        )?;
         framed.send(err).await?;
         return Ok(());
     }

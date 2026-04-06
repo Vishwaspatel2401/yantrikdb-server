@@ -25,7 +25,7 @@ tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 
 # CLI
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 
 # Data
 rusqlite = { version = "0.37", features = ["bundled"] }
@@ -57,6 +57,9 @@ anyhow = "1"
 thiserror = "2"
 uuid7 = "1"
 bytes = "1"
+
+# For `cluster status` CLI command
+reqwest = { version = "0.12", features = ["json", "blocking"] }
 
 [dev-dependencies]
 reqwest = { version = "0.12", features = ["json"] }

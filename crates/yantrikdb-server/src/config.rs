@@ -163,7 +163,11 @@ impl ClusterSection {
     /// Total voter count (this node + voter peers, excluding witness/read replicas).
     pub fn voter_count(&self) -> usize {
         let self_voter = matches!(self.role, NodeRole::Voter) as usize;
-        let peer_voters = self.peers.iter().filter(|p| p.role == NodeRole::Voter).count();
+        let peer_voters = self
+            .peers
+            .iter()
+            .filter(|p| p.role == NodeRole::Voter)
+            .count();
         self_voter + peer_voters
     }
 

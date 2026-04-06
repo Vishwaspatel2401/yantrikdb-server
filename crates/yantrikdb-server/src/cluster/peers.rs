@@ -11,11 +11,11 @@ use crate::config::{NodeRole, PeerConfig};
 pub struct PeerStatus {
     pub addr: String,
     pub configured_role: NodeRole,
-    pub node_id: Option<u32>,           // learned from handshake
-    pub current_term: u64,              // last known term
-    pub last_seen: Option<Instant>,     // last successful contact
+    pub node_id: Option<u32>,       // learned from handshake
+    pub current_term: u64,          // last known term
+    pub last_seen: Option<Instant>, // last successful contact
     pub reachable: bool,
-    pub last_hlc: Option<Vec<u8>>,      // last known oplog position
+    pub last_hlc: Option<Vec<u8>>, // last known oplog position
     pub last_op_id: Option<String>,
 }
 
@@ -65,12 +65,7 @@ impl PeerRegistry {
     }
 
     /// Mark a peer as reachable, update its state from a handshake.
-    pub fn record_handshake(
-        &self,
-        addr: &str,
-        node_id: u32,
-        current_term: u64,
-    ) {
+    pub fn record_handshake(&self, addr: &str, node_id: u32, current_term: u64) {
         let mut peers = self.peers.lock().unwrap();
         if let Some(p) = peers.get_mut(addr) {
             p.node_id = Some(node_id);

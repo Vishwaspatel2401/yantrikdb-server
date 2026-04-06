@@ -65,20 +65,20 @@ pub enum OpCode {
     InfoResult = 0xA2,
 
     // --- Cluster / Replication (0xC0–0xCF) ---
-    ClusterHello = 0xC0,       // Initial peer handshake
-    ClusterHelloOk = 0xC1,     // Handshake response
-    OplogPull = 0xC2,          // Request ops since (hlc, op_id)
-    OplogPullResult = 0xC3,    // Batch of ops
-    OplogPush = 0xC4,          // Push ops to peer (primary → secondary)
-    OplogPushOk = 0xC5,        // Ack with last_applied (hlc, op_id)
-    Heartbeat = 0xC6,          // Leader → follower heartbeat
-    HeartbeatAck = 0xC7,       // Follower → leader ack with current state
-    RequestVote = 0xC8,        // Candidate requests vote
-    VoteGranted = 0xC9,        // Vote granted
-    VoteDenied = 0xCA,         // Vote denied
-    ClusterStatus = 0xCB,      // Get cluster overview
+    ClusterHello = 0xC0,    // Initial peer handshake
+    ClusterHelloOk = 0xC1,  // Handshake response
+    OplogPull = 0xC2,       // Request ops since (hlc, op_id)
+    OplogPullResult = 0xC3, // Batch of ops
+    OplogPush = 0xC4,       // Push ops to peer (primary → secondary)
+    OplogPushOk = 0xC5,     // Ack with last_applied (hlc, op_id)
+    Heartbeat = 0xC6,       // Leader → follower heartbeat
+    HeartbeatAck = 0xC7,    // Follower → leader ack with current state
+    RequestVote = 0xC8,     // Candidate requests vote
+    VoteGranted = 0xC9,     // Vote granted
+    VoteDenied = 0xCA,      // Vote denied
+    ClusterStatus = 0xCB,   // Get cluster overview
     ClusterStatusResult = 0xCC,
-    ReadOnlyError = 0xCD,      // Sent when client tries to write to read-only replica
+    ReadOnlyError = 0xCD, // Sent when client tries to write to read-only replica
 
     // --- Control (0xF0–0xF2) ---
     Error = 0xF0,

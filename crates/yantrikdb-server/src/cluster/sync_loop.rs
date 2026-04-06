@@ -105,7 +105,11 @@ async fn pull_from_leader(ctx: &Arc<ClusterContext>, leader_addr: &str) -> anyho
 
     let count = result.ops.len();
     let last_hlc = result.ops.last().map(|o| o.hlc.clone()).unwrap_or_default();
-    let last_op_id = result.ops.last().map(|o| o.op_id.clone()).unwrap_or_default();
+    let last_op_id = result
+        .ops
+        .last()
+        .map(|o| o.op_id.clone())
+        .unwrap_or_default();
 
     let apply = handle_oplog_apply(&ctx.default_engine()?, result.ops)?;
 

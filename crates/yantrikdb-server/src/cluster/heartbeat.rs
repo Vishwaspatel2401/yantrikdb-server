@@ -43,19 +43,39 @@ pub async fn run_heartbeat_loop(ctx: Arc<ClusterContext>, cancel: CancellationTo
 
         if ctx.state.is_leader() {
             send_heartbeats_to_peers(&ctx).await;
-        } else if matches!(
-            ctx.state.leader_role(),
-            crate::cluster::LeaderRole::Follower | crate::cluster::LeaderRole::Candidate
-        ) {
-            // Only check election once per "deadline window" to avoid spamming elections
-            if Instant::now() >= next_election_check {
+        } else {
+            // Non-leaders: ping peers to keep registry fresh (peer discovery)
+            ping_peers(&ctx).await;
+
+            if matches!(
+                ctx.state.leader_role(),
+                crate::cluster::LeaderRole::Follower | crate::cluster::LeaderRole::Candidate
+            ) && Instant::now() >= next_election_check
+            {
                 check_leader_liveness(&ctx).await;
                 // Reset the deadline with new random jitter for next round
                 let jitter = rand::thread_rng().gen_range(0..ctx.config.election_timeout_ms);
-                next_election_check = Instant::now()
-                    + Duration::from_millis(ctx.config.election_timeout_ms + jitter);
+                next_election_check =
+                    Instant::now() + Duration::from_millis(ctx.config.election_timeout_ms + jitter);
             }
         }
+    }
+}
+
+/// Non-leader peer discovery — handshake with all peers to keep them marked reachable.
+async fn ping_peers(ctx: &Arc<ClusterContext>) {
+    let peers = ctx.peers.snapshot();
+    for peer in peers {
+        let ctx = Arc::clone(ctx);
+        let addr = peer.addr.clone();
+        tokio::spawn(async move {
+            match crate::cluster::client::connect_and_handshake(&addr, &ctx).await {
+                Ok(_) => {} // handshake itself updates peer registry
+                Err(_) => {
+                    ctx.peers.mark_unreachable(&addr);
+                }
+            }
+        });
     }
 }
 
@@ -115,7 +135,8 @@ async fn send_heartbeat_to(
         if ack.term > ctx.state.current_term() {
             ctx.state.become_follower(ack.term, None)?;
         }
-        ctx.peers.update_oplog_position(addr, ack.follower_last_hlc, ack.follower_last_op_id);
+        ctx.peers
+            .update_oplog_position(addr, ack.follower_last_hlc, ack.follower_last_op_id);
     }
 
     Ok(())
@@ -135,10 +156,7 @@ async fn check_leader_liveness(ctx: &Arc<ClusterContext>) {
     }
 
     // Only voters can run for leader. Read replicas + witnesses skip.
-    if !matches!(
-        ctx.state.configured_role,
-        crate::config::NodeRole::Voter
-    ) {
+    if !matches!(ctx.state.configured_role, crate::config::NodeRole::Voter) {
         return;
     }
 

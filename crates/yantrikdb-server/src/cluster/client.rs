@@ -50,6 +50,11 @@ pub async fn connect_and_handshake(
         anyhow::bail!("expected ClusterHelloOk, got {:?}", resp.opcode);
     }
 
-    let _ok: ClusterHelloOk = unpack(&resp.payload)?;
+    let ok: ClusterHelloOk = unpack(&resp.payload)?;
+
+    // Record this peer's identity in our registry
+    ctx.peers
+        .record_handshake(addr, ok.node_id, ok.current_term);
+
     Ok(framed)
 }

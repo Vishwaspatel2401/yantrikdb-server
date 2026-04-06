@@ -33,6 +33,32 @@ fn resolve_engine(
         .and_then(|h| h.strip_prefix("Bearer "))
         .ok_or_else(|| app_error(StatusCode::UNAUTHORIZED, "missing Bearer token"))?;
 
+    // Cluster master token check
+    if let Some(ref cluster) = state.cluster {
+        if let Some(ref secret) = cluster.config.cluster_secret {
+            if token == secret.as_str() {
+                let control = state.control.lock().unwrap();
+                let db_record = control
+                    .get_database("default")
+                    .map_err(|e| app_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+                    .ok_or_else(|| {
+                        app_error(StatusCode::NOT_FOUND, "default database not found")
+                    })?;
+                drop(control);
+                let engine = state
+                    .pool
+                    .get_engine(&db_record)
+                    .map_err(|e| app_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+                state.workers.start_for_database(
+                    db_record.id,
+                    db_record.name.clone(),
+                    std::sync::Arc::clone(&engine),
+                );
+                return Ok((db_record.id, engine));
+            }
+        }
+    }
+
     let token_hash = auth::hash_token(token);
     let control = state.control.lock().unwrap();
     let db_id = control

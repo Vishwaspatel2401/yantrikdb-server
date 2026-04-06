@@ -158,12 +158,7 @@ impl NodeState {
         *self.current_leader.lock().unwrap() = leader_id;
         *self.last_heartbeat.lock().unwrap() = Some(Instant::now());
 
-        tracing::info!(
-            node_id = self.node_id,
-            term,
-            ?leader_id,
-            "became follower"
-        );
+        tracing::info!(node_id = self.node_id, term, ?leader_id, "became follower");
         Ok(())
     }
 
@@ -235,12 +230,7 @@ impl NodeState {
         raft.voted_for = Some(candidate_id);
         raft.save(&self.raft_state_path)?;
 
-        tracing::debug!(
-            term,
-            candidate_id,
-            voter_id = self.node_id,
-            "vote granted"
-        );
+        tracing::debug!(term, candidate_id, voter_id = self.node_id, "vote granted");
         Ok(true)
     }
 

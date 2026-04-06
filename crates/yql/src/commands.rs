@@ -66,6 +66,11 @@ fn execute_meta(client: &Client, line: &str) -> Result<()> {
             format::print_think_result(&result);
             Ok(())
         }
+        "cluster" => {
+            let result = client.get("/v1/cluster")?;
+            format::print_cluster(&result);
+            Ok(())
+        }
         "json" => {
             // \json <path> — raw GET
             if let Some(path) = rest.first() {
@@ -268,6 +273,7 @@ fn print_help() {
     println!("  \\conflicts \\c    list open conflicts");
     println!("  \\personality \\p  derived personality traits");
     println!("  \\think     \\t    run consolidation + conflict scan");
+    println!("  \\cluster         cluster status (replication / failover)");
     println!("  \\health          server health");
     println!("  \\json <path>     raw GET request");
     println!("  \\help      \\h    this help");

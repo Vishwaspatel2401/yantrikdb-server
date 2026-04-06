@@ -74,9 +74,7 @@ impl ClusterContext {
     /// Get a default-database engine for replication ops.
     /// For now we replicate the "default" database. Multi-db replication
     /// will come in a follow-up.
-    pub fn default_engine(
-        &self,
-    ) -> anyhow::Result<Arc<std::sync::Mutex<yantrikdb::YantrikDB>>> {
+    pub fn default_engine(&self) -> anyhow::Result<Arc<std::sync::Mutex<yantrikdb::YantrikDB>>> {
         // The default database always exists (created on server startup).
         let db_record = crate::control::DatabaseRecord {
             id: 1,

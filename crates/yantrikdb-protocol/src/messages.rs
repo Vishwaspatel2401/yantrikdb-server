@@ -431,10 +431,10 @@ pub struct ClusterHelloOk {
 /// Request operations from a peer's oplog since a watermark.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OplogPullRequest {
-    pub since_hlc: Option<Vec<u8>>,    // 16-byte HLC timestamp, None for "from beginning"
+    pub since_hlc: Option<Vec<u8>>, // 16-byte HLC timestamp, None for "from beginning"
     pub since_op_id: Option<String>,
-    pub limit: usize,                   // max ops per batch
-    pub exclude_actor: Option<String>,  // skip ops from this actor (avoid loops)
+    pub limit: usize,                  // max ops per batch
+    pub exclude_actor: Option<String>, // skip ops from this actor (avoid loops)
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -541,9 +541,9 @@ pub mod error_codes {
     pub const INTERNAL_ERROR: u16 = 5000;
     pub const EMBEDDING_ERROR: u16 = 5001;
     // Cluster errors
-    pub const READONLY_NODE: u16 = 6000;       // Can't write to read replica
-    pub const NOT_LEADER: u16 = 6001;          // Try the current leader instead
-    pub const NO_QUORUM: u16 = 6002;           // Cluster lost quorum
+    pub const READONLY_NODE: u16 = 6000; // Can't write to read replica
+    pub const NOT_LEADER: u16 = 6001; // Try the current leader instead
+    pub const NO_QUORUM: u16 = 6002; // Cluster lost quorum
     pub const CLUSTER_SECRET_MISMATCH: u16 = 6003;
     pub const PEER_TERM_MISMATCH: u16 = 6004;
 }
