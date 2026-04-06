@@ -674,11 +674,27 @@ async fn metrics(State(state): State<Arc<AppState>>) -> String {
         }
     }
 
-    // Per-database stats (default DB only for now)
-    if let Ok(db_record) = state.control.lock().unwrap().get_database("default") {
-        if let Some(rec) = db_record {
-            if let Ok(engine) = state.pool.get_engine(&rec) {
-                if let Ok(stats) = engine.lock().unwrap().stats(None) {
+    // Per-database stats (default DB only for now).
+    // IMPORTANT: do NOT hold control.lock() across engine.lock() — that
+    // serializes /metrics behind any long-running engine call AND blocks all
+    // auth (which needs control). Scope the control lock tightly, then drop
+    // it before touching the engine.
+    let default_db = {
+        let control = state.control.lock().unwrap();
+        control.get_database("default").ok().flatten()
+    };
+    if let Some(rec) = default_db {
+        if let Ok(engine) = state.pool.get_engine(&rec) {
+            let stats_opt = {
+                // Use try_lock so a slow engine call (e.g. embedding generation)
+                // can never wedge the metrics endpoint. Skip this scrape instead.
+                match engine.try_lock() {
+                    Ok(db) => db.stats(None).ok(),
+                    Err(_) => None,
+                }
+            };
+            if let Some(stats) = stats_opt {
+                {
                     out.push_str("# HELP yantrikdb_active_memories Number of active memories\n");
                     out.push_str("# TYPE yantrikdb_active_memories gauge\n");
                     out.push_str(&format!(
