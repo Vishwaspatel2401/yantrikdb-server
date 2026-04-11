@@ -310,9 +310,17 @@ pub fn check_redundancy(db: &YantrikDB, _sim_threshold: f64) -> Result<Vec<Trigg
                         suggested_action: "review_conflict".to_string(),
                         context,
                     });
-                } else if let Some((cat_name, token_a, token_b)) =
-                    check_substitution_category_pair(&*db.conn(), &rows[i].1, &rows[j].1)
-                {
+                } else if let Some((cat_name, token_a, token_b)) = {
+                    // CRITICAL: bind the conn guard inside this block so it
+                    // is dropped before conflict_exists() below tries to take
+                    // the same connection mutex. Without this scoping, the
+                    // if-let scrutinee's temporary MutexGuard lives through
+                    // the body and self-deadlocks the calling thread (the
+                    // engine's connection mutex is std::sync::Mutex, which
+                    // is non-reentrant).
+                    let conn = db.conn();
+                    check_substitution_category_pair(&*conn, &rows[i].1, &rows[j].1)
+                } {
                     // Substitution category match -> create actual conflict record
                     let reason = format!(
                         "{} substitution: '{}' vs '{}' (similarity={:.0}%)",
@@ -370,9 +378,13 @@ pub fn check_redundancy(db: &YantrikDB, _sim_threshold: f64) -> Result<Vec<Trigg
             let sim = crate::consolidate::cosine_similarity(&emb_a, &emb_b);
 
             if sim > cat_threshold && sim <= threshold {
-                if let Some((cat_name, token_a, token_b)) =
-                    check_substitution_category_pair(&*db.conn(), &rows[i].1, &rows[j].1)
-                {
+                // Same self-deadlock fix as the first pass above: bind the
+                // conn guard inside a scrutinee block so it drops before
+                // conflict_exists() reacquires the connection mutex.
+                if let Some((cat_name, token_a, token_b)) = {
+                    let conn = db.conn();
+                    check_substitution_category_pair(&*conn, &rows[i].1, &rows[j].1)
+                } {
                     let reason = format!(
                         "{} substitution: '{}' vs '{}' (similarity={:.0}%)",
                         cat_name, token_a, token_b, sim * 100.0
