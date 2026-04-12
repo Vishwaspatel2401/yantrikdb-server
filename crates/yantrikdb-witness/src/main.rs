@@ -199,6 +199,7 @@ async fn handle_peer(stream: TcpStream, witness: std::sync::Arc<Witness>) -> any
         role: "witness".to_string(),
         current_term: witness.current_term(),
         leader_id: None,
+        protocol_version: yantrikdb_protocol::messages::PROTOCOL_VERSION,
     };
     let resp_frame = make_frame(OpCode::ClusterHelloOk, frame.stream_id, &resp)?;
     framed.send(resp_frame).await?;
