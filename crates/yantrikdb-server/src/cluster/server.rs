@@ -70,16 +70,36 @@ async fn handle_peer_connection(stream: TcpStream, ctx: Arc<ClusterContext>) -> 
         anyhow::bail!("cluster secret mismatch from peer");
     }
 
+    // Verify protocol version. Treat 0 (field absent from pre-v0.5.10
+    // nodes) as v1 for backward compatibility during rolling upgrades.
+    let peer_version = if hello.protocol_version == 0 {
+        1
+    } else {
+        hello.protocol_version
+    };
+    let our_version = yantrikdb_protocol::messages::PROTOCOL_VERSION;
+    if peer_version != our_version {
+        let msg = format!(
+            "protocol version mismatch: peer={}, ours={}",
+            peer_version, our_version,
+        );
+        tracing::warn!(peer = %hello.advertise_addr, %peer_version, %our_version, "rejecting peer: {}", msg);
+        let err = make_error(frame.stream_id, error_codes::INVALID_PAYLOAD, &msg)?;
+        framed.send(err).await?;
+        anyhow::bail!("{}", msg);
+    }
+
     // Record peer in registry
     ctx.peers
         .record_handshake(&hello.advertise_addr, hello.node_id, hello.current_term);
 
-    // Send hello-ok
+    // Send hello-ok with our protocol version
     let resp = ClusterHelloOk {
         node_id: ctx.node_id(),
         role: role_string(ctx.state.configured_role),
         current_term: ctx.state.current_term(),
         leader_id: ctx.state.current_leader(),
+        protocol_version: our_version,
     };
     let resp_frame = make_frame(OpCode::ClusterHelloOk, frame.stream_id, &resp)?;
     framed.send(resp_frame).await?;

@@ -26,7 +26,7 @@ pub async fn connect_and_handshake(
         .map_err(|_| anyhow::anyhow!("connect timeout to {}", addr))??;
     let mut framed = Framed::new(stream, YantrikCodec::new());
 
-    // Send hello
+    // Send hello with protocol version
     let hello = ClusterHello {
         node_id: ctx.node_id(),
         role: crate::cluster::server::role_string(ctx.state.configured_role),
@@ -37,6 +37,7 @@ pub async fn connect_and_handshake(
             .advertise_addr
             .clone()
             .unwrap_or_else(|| format!("0.0.0.0:{}", ctx.config.cluster_port)),
+        protocol_version: yantrikdb_protocol::messages::PROTOCOL_VERSION,
     };
     let frame = make_frame(OpCode::ClusterHello, 0, &hello)?;
     framed.send(frame).await?;
@@ -51,6 +52,25 @@ pub async fn connect_and_handshake(
     }
 
     let ok: ClusterHelloOk = unpack(&resp.payload)?;
+
+    // Verify protocol version compatibility. Treat 0 (missing field from
+    // older nodes) as v1 for backward compatibility during rolling upgrades.
+    let peer_version = if ok.protocol_version == 0 {
+        1
+    } else {
+        ok.protocol_version
+    };
+    let our_version = yantrikdb_protocol::messages::PROTOCOL_VERSION;
+    if peer_version != our_version {
+        anyhow::bail!(
+            "protocol version mismatch with {}: peer={}, ours={}. \
+             Both nodes must run the same wire protocol version. \
+             Upgrade the older node first.",
+            addr,
+            peer_version,
+            our_version,
+        );
+    }
 
     // Record this peer's identity in our registry
     ctx.peers

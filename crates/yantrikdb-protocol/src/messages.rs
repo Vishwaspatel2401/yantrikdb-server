@@ -410,6 +410,18 @@ pub struct ErrorResponse {
 
 // ── Cluster / Replication ─────────────────────────────────────────
 
+/// Wire protocol version. Bumped when the handshake, frame format, or oplog
+/// entry encoding changes in a backward-incompatible way.
+///
+/// Compatibility rule: a node accepts a peer whose `protocol_version` equals
+/// its own. Future versions may widen this to a range (e.g. "accept v1–v2")
+/// via a negotiation table, but strict equality is the safe default until we
+/// have a second version to negotiate with.
+///
+/// Version history:
+///   1 — initial (v0.5.0 through v0.5.9)
+pub const PROTOCOL_VERSION: u32 = 1;
+
 /// Initial peer-to-peer handshake.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ClusterHello {
@@ -418,6 +430,10 @@ pub struct ClusterHello {
     pub current_term: u64,
     pub cluster_secret: String,
     pub advertise_addr: String,
+    /// Wire protocol version. Added in v0.5.10. Older nodes that don't send
+    /// this field default to 0 (treated as v1 for backward compatibility).
+    #[serde(default)]
+    pub protocol_version: u32,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -426,6 +442,9 @@ pub struct ClusterHelloOk {
     pub role: String,
     pub current_term: u64,
     pub leader_id: Option<u32>,
+    /// Echoed back so the initiator can verify version agreement.
+    #[serde(default)]
+    pub protocol_version: u32,
 }
 
 /// Request operations from a peer's oplog since a watermark.

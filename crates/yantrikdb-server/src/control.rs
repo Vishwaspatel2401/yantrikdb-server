@@ -33,6 +33,13 @@ pub struct TokenRecord {
 impl ControlDb {
     pub fn open(path: &Path) -> anyhow::Result<Self> {
         let conn = Connection::open(path)?;
+        // Same pragma hardening as tenant databases.
+        conn.execute_batch(
+            "PRAGMA journal_mode=WAL; \
+             PRAGMA synchronous=NORMAL; \
+             PRAGMA foreign_keys=ON; \
+             PRAGMA busy_timeout=5000;",
+        )?;
         let db = Self { conn };
         db.init_schema()?;
         Ok(db)

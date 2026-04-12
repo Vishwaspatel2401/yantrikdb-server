@@ -158,7 +158,44 @@ impl YantrikDB {
         master_key: Option<&[u8; 32]>,
     ) -> Result<Self> {
         let conn = Connection::open(db_path)?;
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
+
+        // Enforce SQLite pragmas for durability + performance.
+        // See CONCURRENCY.md and ops/runbooks/disk-full.md.
+        //
+        // journal_mode=WAL: write-ahead logging for concurrent readers +
+        //   crash recovery. Critical for all multi-threaded usage.
+        // synchronous=NORMAL: in WAL mode, NORMAL is crash-safe (protects
+        //   against corruption on power loss) while avoiding the fsync-per-
+        //   commit overhead of FULL. The WAL itself is fsync'd on checkpoint.
+        // foreign_keys=ON: enforce referential integrity on conflicts,
+        //   sessions, etc.
+        // busy_timeout=5000: wait up to 5 seconds for a lock instead of
+        //   immediately returning SQLITE_BUSY. Prevents spurious failures
+        //   under concurrent access (e.g., oplog GC + consolidation).
+        // wal_autocheckpoint=1000: auto-checkpoint after 1000 pages (~4MB).
+        //   Prevents unbounded WAL growth under sustained write load.
+        conn.execute_batch(
+            "PRAGMA journal_mode=WAL; \
+             PRAGMA synchronous=NORMAL; \
+             PRAGMA foreign_keys=ON; \
+             PRAGMA busy_timeout=5000; \
+             PRAGMA wal_autocheckpoint=1000;",
+        )?;
+
+        // Verify critical pragmas actually took effect. SQLite silently
+        // ignores some pragmas in certain modes (e.g. journal_mode on
+        // read-only or in-memory databases). Log a warning if any mismatch.
+        let actual_journal: String = conn.query_row(
+            "PRAGMA journal_mode", [], |row| row.get(0),
+        ).unwrap_or_default();
+        if actual_journal != "wal" && db_path != ":memory:" {
+            tracing::warn!(
+                expected = "wal",
+                actual = %actual_journal,
+                path = %db_path,
+                "SQLite journal_mode pragma did not take effect"
+            );
+        }
 
         // Check existing schema version for migration
         let existing_version = Self::get_schema_version(&conn);
