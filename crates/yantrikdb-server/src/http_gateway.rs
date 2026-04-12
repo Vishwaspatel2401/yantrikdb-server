@@ -946,6 +946,47 @@ async fn list_databases(
     Ok(Json(json!({ "databases": list })))
 }
 
+/// GET /v1/admin/control-snapshot — returns a full snapshot of the control
+/// plane (databases + active tokens) for replication to followers.
+///
+/// Authenticated by cluster master token only. Called by the follower's
+/// control-sync loop, not by end users.
+async fn control_snapshot(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+) -> AppResult {
+    // Require cluster master token
+    let token = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+        .ok_or_else(|| app_error(StatusCode::UNAUTHORIZED, "missing Bearer token"))?;
+
+    let is_master = state
+        .cluster
+        .as_ref()
+        .and_then(|c| c.config.cluster_secret.as_ref())
+        .map(|s| token == s.as_str())
+        .unwrap_or(false);
+
+    if !is_master {
+        return Err(app_error(
+            StatusCode::FORBIDDEN,
+            "control-snapshot requires cluster master token",
+        ));
+    }
+
+    let snapshot = tokio::task::spawn_blocking({
+        let control = state.control.clone();
+        move || control.lock().export_snapshot()
+    })
+    .await
+    .map_err(|e| app_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    .map_err(|e| app_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(serde_json::to_value(snapshot).unwrap_or_default()))
+}
+
 /// Build the Axum router.
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
@@ -967,6 +1008,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/databases", get(list_databases))
         .route("/v1/cluster", get(cluster_status))
         .route("/v1/cluster/promote", post(cluster_promote))
+        .route("/v1/admin/control-snapshot", get(control_snapshot))
         .route("/metrics", get(metrics))
         .with_state(state)
 }

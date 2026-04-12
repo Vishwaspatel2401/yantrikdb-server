@@ -21,6 +21,7 @@ use crate::cluster::ClusterContext;
 const PULL_INTERVAL: Duration = Duration::from_millis(500);
 const PULL_BATCH_SIZE: usize = 500;
 const DB_LIST_REFRESH_INTERVAL: Duration = Duration::from_secs(10);
+const CONTROL_SYNC_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Run the oplog sync loop. Followers and read replicas pull from the leader.
 pub async fn run_sync_loop(ctx: Arc<ClusterContext>, cancel: CancellationToken) {
@@ -28,6 +29,7 @@ pub async fn run_sync_loop(ctx: Arc<ClusterContext>, cancel: CancellationToken) 
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     let mut last_db_list_refresh = tokio::time::Instant::now();
+    let mut last_control_sync = tokio::time::Instant::now();
 
     tracing::info!(node_id = ctx.node_id(), "oplog sync loop started");
 
@@ -72,6 +74,17 @@ pub async fn run_sync_loop(ctx: Arc<ClusterContext>, cancel: CancellationToken) 
             last_db_list_refresh = tokio::time::Instant::now();
         }
 
+        // Periodically sync the control plane (databases + tokens) from
+        // the leader via HTTP snapshot. This ensures tokens minted on the
+        // leader are available on followers within ~30 seconds, fixing
+        // the "token only works on one node" footgun. See task #83.
+        if last_control_sync.elapsed() >= CONTROL_SYNC_INTERVAL {
+            if let Err(e) = sync_control_plane(&ctx, &leader_addr).await {
+                tracing::trace!(leader = %leader_addr, error = %e, "control plane sync failed");
+            }
+            last_control_sync = tokio::time::Instant::now();
+        }
+
         // Pull ops for each known database
         let dbs = ctx.list_databases();
         for db_name in dbs {
@@ -85,6 +98,73 @@ pub async fn run_sync_loop(ctx: Arc<ClusterContext>, cancel: CancellationToken) 
             }
         }
     }
+}
+
+/// Pull the leader's control plane snapshot (databases + tokens) via
+/// its HTTP admin endpoint and merge into our local control.db.
+///
+/// This is an additive merge: new databases and tokens from the leader
+/// are inserted locally; local-only records are NOT deleted. The snapshot
+/// is O(N) for N databases + tokens, which is fine for realistic control
+/// plane sizes (< 1000).
+async fn sync_control_plane(ctx: &Arc<ClusterContext>, leader_addr: &str) -> anyhow::Result<()> {
+    let control = match ctx.control.as_ref() {
+        Some(c) => c,
+        None => return Ok(()), // no control db → single-node, nothing to sync
+    };
+
+    let secret = ctx
+        .config
+        .cluster_secret
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("no cluster_secret configured"))?;
+
+    // leader_addr is the cluster RPC address (e.g. "192.168.4.141:7440").
+    // The HTTP gateway runs on a different port. Derive it from the config
+    // or fall back to the standard mapping: cluster_port → http_port.
+    // Convention: if cluster port is 7440, HTTP is 7438.
+    let http_addr = leader_addr.replace(":7440", ":7438");
+
+    let url = format!("http://{}/v1/admin/control-snapshot", http_addr);
+
+    // Use a simple HTTP client (reqwest would be ideal but we avoid adding
+    // a new dependency; tokio::net::TcpStream + manual HTTP is too low-level.
+    // Instead, shell out to curl which is available on all deployment targets).
+    let output = tokio::process::Command::new("curl")
+        .args([
+            "-sS",
+            "--max-time",
+            "10",
+            "-H",
+            &format!("Authorization: Bearer {}", secret),
+            &url,
+        ])
+        .output()
+        .await?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("control-snapshot HTTP failed: {}", stderr);
+    }
+
+    let snapshot: crate::control::ControlSnapshot = serde_json::from_slice(&output.stdout)?;
+
+    let control = control.clone();
+    let (dbs_added, tokens_added) = tokio::task::spawn_blocking(move || {
+        let ctrl = control.lock();
+        ctrl.import_snapshot(&snapshot)
+    })
+    .await??;
+
+    if dbs_added > 0 || tokens_added > 0 {
+        tracing::info!(
+            dbs_added,
+            tokens_added,
+            "control plane sync: imported from leader"
+        );
+    }
+
+    Ok(())
 }
 
 async fn sync_database_list(ctx: &Arc<ClusterContext>, leader_addr: &str) -> anyhow::Result<()> {

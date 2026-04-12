@@ -10,7 +10,7 @@ pub struct ControlDb {
     conn: Connection,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DatabaseRecord {
     pub id: i64,
     pub name: String,
@@ -174,4 +174,78 @@ impl ControlDb {
             .query_row("SELECT COUNT(*) FROM databases", [], |row| row.get(0))?;
         Ok(count as usize)
     }
+
+    // ── Control Plane Replication ──────────────────────────────────
+
+    /// Export a full snapshot of databases + active tokens for replication.
+    /// Called by the leader's HTTP admin endpoint.
+    pub fn export_snapshot(&self) -> anyhow::Result<ControlSnapshot> {
+        let databases = self.list_databases()?;
+
+        let mut stmt = self.conn.prepare(
+            "SELECT hash, database_id, label, created_at FROM tokens WHERE revoked_at IS NULL",
+        )?;
+        let tokens = stmt
+            .query_map([], |row| {
+                Ok(TokenSnapshot {
+                    hash: row.get(0)?,
+                    database_id: row.get(1)?,
+                    label: row.get(2)?,
+                    created_at: row.get(3)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(ControlSnapshot { databases, tokens })
+    }
+
+    /// Import a control snapshot from the leader, upserting databases and
+    /// tokens that don't exist locally. Does NOT delete local-only records
+    /// — this is an additive merge, not a replace.
+    ///
+    /// Returns (databases_added, tokens_added).
+    pub fn import_snapshot(&self, snapshot: &ControlSnapshot) -> anyhow::Result<(usize, usize)> {
+        let mut dbs_added = 0;
+        for db in &snapshot.databases {
+            let exists = self.database_exists(&db.name)?;
+            if !exists {
+                self.conn.execute(
+                    "INSERT INTO databases (id, name, path, created_at) VALUES (?1, ?2, ?3, ?4)",
+                    params![db.id, db.name, db.path, db.created_at],
+                )?;
+                dbs_added += 1;
+            }
+        }
+
+        let mut tokens_added = 0;
+        for tok in &snapshot.tokens {
+            // Upsert: insert if not exists (idempotent)
+            let changed = self.conn.execute(
+                "INSERT OR IGNORE INTO tokens (hash, database_id, label, created_at)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![tok.hash, tok.database_id, tok.label, tok.created_at],
+            )?;
+            if changed > 0 {
+                tokens_added += 1;
+            }
+        }
+
+        Ok((dbs_added, tokens_added))
+    }
+}
+
+/// Snapshot of the control plane for replication between cluster nodes.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ControlSnapshot {
+    pub databases: Vec<DatabaseRecord>,
+    pub tokens: Vec<TokenSnapshot>,
+}
+
+/// Token record as serialized for replication (no revoked tokens).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TokenSnapshot {
+    pub hash: String,
+    pub database_id: i64,
+    pub label: String,
+    pub created_at: String,
 }
