@@ -1,0 +1,93 @@
+# YantrikDB Single-Node Deployment for Kubernetes
+#
+# Deploy: kubectl apply -f yantrikdb-single.yaml
+# Access: kubectl port-forward svc/yantrikdb 7438:7438
+#
+# This manifest runs a single YantrikDB server with persistent storage.
+# For HA cluster setup, see yantrikdb-cluster.yaml.
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: yantrikdb-data
+  labels:
+    app: yantrikdb
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: yantrikdb
+  labels:
+    app: yantrikdb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: yantrikdb
+  template:
+    metadata:
+      labels:
+        app: yantrikdb
+    spec:
+      containers:
+        - name: yantrikdb
+          image: ghcr.io/yantrikos/yantrikdb:latest
+          command: ["yantrikdb", "serve", "--data-dir", "/data"]
+          ports:
+            - name: wire
+              containerPort: 7437
+            - name: http
+              containerPort: 7438
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "2000m"
+          readinessProbe:
+            httpGet:
+              path: /v1/health/deep
+              port: 7438
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /v1/health
+              port: 7438
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: yantrikdb-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: yantrikdb
+  labels:
+    app: yantrikdb
+spec:
+  type: ClusterIP
+  ports:
+    - name: wire
+      port: 7437
+      targetPort: 7437
+    - name: http
+      port: 7438
+      targetPort: 7438
+    - name: metrics
+      port: 9090
+      targetPort: 7438
+  selector:
+    app: yantrikdb

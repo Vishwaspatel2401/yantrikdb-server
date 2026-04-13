@@ -1,0 +1,235 @@
+# YantrikDB HA Cluster for Kubernetes
+#
+# Deploy: kubectl apply -f yantrikdb-cluster.yaml
+#
+# Creates a 3-node cluster: 2 voters (StatefulSet) + 1 witness (Deployment).
+# Each voter gets its own PVC for persistent storage.
+#
+# After deployment:
+#   1. Create a database: kubectl exec yantrikdb-0 -- yantrikdb db --data-dir /data create mydb
+#   2. Mint a token: kubectl exec yantrikdb-0 -- yantrikdb token --data-dir /data create --db mydb
+#   3. Port-forward: kubectl port-forward svc/yantrikdb 7438:7438
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: yantrikdb-cluster-secret
+type: Opaque
+stringData:
+  cluster-secret: "change-me-to-a-random-string"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: yantrikdb-voter-config
+data:
+  yantrikdb.toml: |
+    [cluster]
+    role = "voter"
+    cluster_port = 7440
+    heartbeat_interval_ms = 1000
+    election_timeout_ms = 5000
+
+    [[cluster.peers]]
+    addr = "yantrikdb-0.yantrikdb-headless:7440"
+    role = "voter"
+
+    [[cluster.peers]]
+    addr = "yantrikdb-1.yantrikdb-headless:7440"
+    role = "voter"
+
+    [[cluster.peers]]
+    addr = "yantrikdb-witness:7440"
+    role = "witness"
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: yantrikdb
+  labels:
+    app: yantrikdb
+    component: voter
+spec:
+  serviceName: yantrikdb-headless
+  replicas: 2
+  selector:
+    matchLabels:
+      app: yantrikdb
+      component: voter
+  template:
+    metadata:
+      labels:
+        app: yantrikdb
+        component: voter
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "7438"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: yantrikdb
+          image: ghcr.io/yantrikos/yantrikdb:latest
+          command:
+            - yantrikdb
+            - serve
+            - --data-dir=/data
+            - --config=/config/yantrikdb.toml
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            # node_id derived from pod ordinal: yantrikdb-0 → 1, yantrikdb-1 → 2
+            - name: YANTRIKDB_CLUSTER_NODE_ID
+              value: "$(POD_NAME)"
+            - name: YANTRIKDB_CLUSTER_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: yantrikdb-cluster-secret
+                  key: cluster-secret
+          ports:
+            - name: wire
+              containerPort: 7437
+            - name: http
+              containerPort: 7438
+            - name: cluster
+              containerPort: 7440
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: config
+              mountPath: /config
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "4000m"
+          readinessProbe:
+            httpGet:
+              path: /v1/health/deep
+              port: 7438
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /v1/health
+              port: 7438
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: yantrikdb-voter-config
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 20Gi
+---
+# Headless service for StatefulSet DNS (yantrikdb-0.yantrikdb-headless, etc.)
+apiVersion: v1
+kind: Service
+metadata:
+  name: yantrikdb-headless
+  labels:
+    app: yantrikdb
+spec:
+  clusterIP: None
+  ports:
+    - name: wire
+      port: 7437
+    - name: http
+      port: 7438
+    - name: cluster
+      port: 7440
+  selector:
+    app: yantrikdb
+    component: voter
+---
+# Client-facing service (load-balances across voters)
+apiVersion: v1
+kind: Service
+metadata:
+  name: yantrikdb
+  labels:
+    app: yantrikdb
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 7438
+      targetPort: 7438
+    - name: wire
+      port: 7437
+      targetPort: 7437
+  selector:
+    app: yantrikdb
+    component: voter
+---
+# Witness deployment (stateless, vote-only)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: yantrikdb-witness
+  labels:
+    app: yantrikdb
+    component: witness
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: yantrikdb
+      component: witness
+  template:
+    metadata:
+      labels:
+        app: yantrikdb
+        component: witness
+    spec:
+      containers:
+        - name: witness
+          image: ghcr.io/yantrikos/yantrikdb-witness:latest
+          command:
+            - yantrikdb-witness
+            - --node-id=99
+            - --cluster-port=7440
+            - --peers=yantrikdb-0.yantrikdb-headless:7440,yantrikdb-1.yantrikdb-headless:7440
+          env:
+            - name: YANTRIKDB_CLUSTER_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: yantrikdb-cluster-secret
+                  key: cluster-secret
+          args:
+            - --cluster-secret=$(YANTRIKDB_CLUSTER_SECRET)
+          ports:
+            - name: cluster
+              containerPort: 7440
+          resources:
+            requests:
+              memory: "32Mi"
+              cpu: "50m"
+            limits:
+              memory: "64Mi"
+              cpu: "200m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: yantrikdb-witness
+  labels:
+    app: yantrikdb
+    component: witness
+spec:
+  clusterIP: None
+  ports:
+    - name: cluster
+      port: 7440
+  selector:
+    app: yantrikdb
+    component: witness
