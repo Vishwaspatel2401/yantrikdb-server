@@ -1,74 +1,124 @@
-# YantrikDB — A Cognitive Memory Engine for Persistent AI Systems
+# YantrikDB
 
-> The memory engine for AI that actually knows you.
+**A memory database that forgets, consolidates, and detects contradictions.**
 
+Vector databases store memories. They don't manage them. After 10,000 memories, recall quality degrades because there's no consolidation, no forgetting, no conflict resolution. Your AI agent just gets noisier.
+
+YantrikDB is different. It's a **cognitive memory engine** — embed it, run it as a server, or connect via MCP. It thinks about what it stores.
+
+[![Crates.io](https://img.shields.io/crates/v/yantrikdb-server)](https://crates.io/crates/yantrikdb-server)
 [![PyPI](https://img.shields.io/pypi/v/yantrikdb)](https://pypi.org/project/yantrikdb/)
-[![Crates.io](https://img.shields.io/crates/v/yantrikdb)](https://crates.io/crates/yantrikdb)
+[![Docker](https://img.shields.io/badge/docker-ghcr.io%2Fyantrikos%2Fyantrikdb-blue)](https://github.com/yantrikos/yantrikdb-server/pkgs/container/yantrikdb)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 
-## Get Started in 60 Seconds
+---
 
-### For AI agents (MCP — works with Claude, Cursor, Windsurf, Copilot)
+## Three things no other database does
+
+### 1. It forgets
+
+```python
+db.record("read the SLA doc by Friday", importance=0.4, half_life=86400)  # 1 day
+# 24 hours later, this memory's relevance score has decayed
+# 7 days later, recall stops surfacing it unless explicitly queried
+```
+
+### 2. It consolidates
+
+```python
+# 20 similar memories about the same meeting
+for note in meeting_notes:
+    db.record(note, namespace="standup-2026-04-12")
+
+db.think()
+# → {"consolidation_count": 5}  # collapsed 20 fragments into 5 canonical memories
+```
+
+### 3. It detects contradictions
+
+```python
+db.record("CEO is Alice")
+db.record("CEO is Bob")  # added later in another conversation
+
+db.think()
+# → {"conflicts_found": 1, "conflicts": [{"memory_a": "CEO is Alice",
+#                                         "memory_b": "CEO is Bob",
+#                                         "type": "factual_contradiction"}]}
+```
+
+Plus: temporal decay with configurable half-life, entity graph with relationship edges, personality derivation from memory patterns, session-aware context surfacing, multi-signal scoring (recency × importance × similarity × graph proximity).
+
+---
+
+## Three ways to use it
+
+### As a network server
+
+```bash
+docker run -p 7438:7438 ghcr.io/yantrikos/yantrikdb:latest
+curl -X POST http://localhost:7438/v1/remember -d '{"text":"hello"}'
+```
+
+Single Rust binary. HTTP + binary wire protocol. 2-voter + 1-witness HA cluster via Docker Compose or Kubernetes. Per-tenant quotas, Prometheus metrics, AES-256-GCM at-rest encryption, runtime deadlock detection. See [docker-compose.cluster.yml](deploy/docker-compose.cluster.yml) and [k8s manifests](deploy/kubernetes/).
+
+### As an MCP server (Claude Code, Cursor, Windsurf)
 
 ```bash
 pip install yantrikdb-mcp
 ```
 
-Add to your MCP client config:
+Add to your MCP client config — the agent auto-recalls context, auto-remembers decisions, auto-detects contradictions. No prompting needed. See [yantrikdb-mcp](https://github.com/yantrikos/yantrikdb-mcp).
 
-```json
-{
-  "mcpServers": {
-    "yantrikdb": {
-      "command": "yantrikdb-mcp"
-    }
-  }
-}
-```
-
-That's it. The agent auto-recalls context, auto-remembers decisions, and auto-detects contradictions — no prompting needed. See [yantrikdb-mcp](https://github.com/yantrikos/yantrikdb-mcp) for full docs.
-
-### As a Python library
+### As an embedded library (Python or Rust)
 
 ```bash
 pip install yantrikdb
+# or
+cargo add yantrikdb
 ```
 
 ```python
 import yantrikdb
-from sentence_transformers import SentenceTransformer
-
-# Single file, no server, no config
 db = yantrikdb.YantrikDB("memory.db", embedding_dim=384)
 db.set_embedder(SentenceTransformer("all-MiniLM-L6-v2"))
-
-# Record memories with importance, domain, and emotional valence
-db.record("Alice is the engineering lead", importance=0.8, domain="people")
-db.record("Project deadline is March 30", importance=0.9, domain="work")
-db.record("User prefers dark mode", importance=0.6, domain="preference")
-
-# Semantic recall — ranked by relevance, recency, importance, and graph proximity
-results = db.recall("who leads the team?", top_k=3)
-# → [{"text": "Alice is the engineering lead", "score": 1.0}, ...]
-
-# Knowledge graph — entity relationships
-db.relate("Alice", "Engineering", "leads")
-db.get_edges("Alice")
-# → [{"src": "Alice", "dst": "Engineering", "rel_type": "leads", "weight": 1.0}]
-
-# Cognitive maintenance — consolidate, detect conflicts, mine patterns
-db.think()
-# → {"consolidation_count": 2, "conflicts_found": 0, "patterns_new": 1}
-
-db.close()
+db.record("Alice leads engineering", importance=0.8)
+db.recall("who leads the team?", top_k=3)
+db.think()  # consolidate, detect conflicts, derive personality
 ```
 
-### As a Rust crate
+---
 
-```toml
-[dependencies]
-yantrikdb = "0.4"
-```
+## Performance
+
+Live numbers from a 2-core LXC cluster with 1689 memories:
+
+| Operation | Latency |
+|---|---|
+| Recall p50 | 112ms (most is query embedding ~100ms) |
+| Recall p99 | 190ms |
+| Batch write | 76 writes/sec |
+| Engine lock acquire | <0.1ms |
+| Deep health probe | <1ms |
+
+For pre-computed embeddings (skip query-time embedding), recall p50 drops to ~5ms.
+
+---
+
+## Status
+
+**v0.5.11** — hardened alpha. The embeddable engine has been used in production by the YantrikOS ecosystem since early 2026. The network server is newer — running live on a 3-node Proxmox cluster with multiple tenants for the past few weeks.
+
+A 42-task hardening sprint just completed across 8 epics:
+- `parking_lot` mutexes everywhere with runtime deadlock detection (caught a self-deadlock that would have taken hours to find with std::sync)
+- Per-handler Prometheus metrics, structured JSON logging, deep health checks
+- Chaos-tested failover (leader kill, network partition, kill-9 mid-write)
+- Per-tenant quotas, load shedding, control plane replication
+- 1178 core tests + chaos harness + cargo-fuzz + CRDT property tests
+- 5 operational runbooks, watchdog with auto-restart
+
+Read the maturity notes: https://yantrikdb.com/server/quickstart/#maturity
+
+
 
 ## The Problem
 
