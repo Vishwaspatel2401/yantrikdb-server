@@ -11,6 +11,8 @@ YantrikDB is different. It's a **cognitive memory engine** — embed it, run it 
 [![Docker](https://img.shields.io/badge/docker-ghcr.io%2Fyantrikos%2Fyantrikdb-blue)](https://github.com/yantrikos/yantrikdb-server/pkgs/container/yantrikdb)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 
+![YantrikDB demo: storing three facts, recalling them, then think() flagging a contradiction between two memories](docs/images/demo.gif)
+
 ---
 
 ## Three things no other database does
