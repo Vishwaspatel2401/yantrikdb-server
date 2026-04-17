@@ -319,4 +319,208 @@ impl YantrikDB {
 
         Ok(count)
     }
+
+    // ── RFC 006 Phase 1: Claims + Entity Aliasing ──
+
+    /// Resolve an entity name through the alias table.
+    ///
+    /// Prefers namespace-specific aliases over the global default namespace.
+    /// Returns the canonical name if an alias exists, or the original name if not.
+    pub fn resolve_alias(&self, entity: &str, namespace: &str) -> String {
+        let conn = self.conn.lock();
+        // Try namespace-specific alias first
+        let result: Option<String> = conn
+            .query_row(
+                "SELECT canonical_name FROM entity_aliases WHERE alias = ?1 AND namespace = ?2",
+                params![entity, namespace],
+                |row| row.get(0),
+            )
+            .ok();
+
+        if let Some(canonical) = result {
+            return canonical;
+        }
+
+        // Fall back to global 'default' namespace
+        conn.query_row(
+            "SELECT canonical_name FROM entity_aliases WHERE alias = ?1 AND namespace = 'default'",
+            params![entity],
+            |row| row.get(0),
+        )
+        .unwrap_or_else(|_| entity.to_string())
+    }
+
+    /// Register an explicit entity alias.
+    pub fn add_entity_alias(
+        &self,
+        alias: &str,
+        canonical_name: &str,
+        namespace: &str,
+        source: &str,
+    ) -> Result<bool> {
+        let ts = now();
+        let conn = self.conn.lock();
+        let changes = conn.execute(
+            "INSERT INTO entity_aliases (alias, canonical_name, namespace, source, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5) \
+             ON CONFLICT(alias, namespace) DO UPDATE SET canonical_name = ?2, source = ?4, created_at = ?5",
+            params![alias, canonical_name, namespace, source, ts],
+        )?;
+        Ok(changes > 0)
+    }
+
+    /// Ingest a structured claim (RFC 006 Phase 1).
+    ///
+    /// This is the primary write path for claims. It resolves entity aliases,
+    /// inserts into the edges table with full qualifier columns, updates the
+    /// entity + graph indexes, and logs to the oplog. `relate()` still works
+    /// but will be deprecated in v0.7 (Phase 5) in favor of this method.
+    #[tracing::instrument(skip(self))]
+    pub fn ingest_claim(
+        &self,
+        src: &str,
+        rel_type: &str,
+        dst: &str,
+        namespace: &str,
+        polarity: i32,
+        modality: &str,
+        valid_from: Option<f64>,
+        valid_to: Option<f64>,
+        extractor: &str,
+        extractor_version: Option<&str>,
+        confidence_band: &str,
+        source_memory_rid: Option<&str>,
+        span_start: Option<i32>,
+        span_end: Option<i32>,
+        weight: f64,
+    ) -> Result<String> {
+        let claim_id = crate::id::new_id();
+        let ts = now();
+
+        // Resolve aliases before storage
+        let src_resolved = self.resolve_alias(src, namespace);
+        let dst_resolved = self.resolve_alias(dst, namespace);
+
+        let (src_type, dst_type) =
+            crate::graph::classify_with_relationship(&src_resolved, &dst_resolved, rel_type);
+
+        // Phase 1: SQL inserts (conn locked)
+        {
+            let conn = self.conn.lock();
+            conn.execute(
+                "INSERT INTO edges (edge_id, src, dst, rel_type, weight, created_at, \
+                 polarity, modality, valid_from, valid_to, extractor, extractor_version, \
+                 confidence_band, source_memory_rid, span_start, span_end, namespace) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17) \
+                 ON CONFLICT(src, dst, rel_type) DO UPDATE SET \
+                 weight = ?5, created_at = ?6, polarity = ?7, modality = ?8, \
+                 valid_from = ?9, valid_to = ?10, extractor = ?11, extractor_version = ?12, \
+                 confidence_band = ?13, source_memory_rid = ?14, span_start = ?15, span_end = ?16, \
+                 namespace = ?17",
+                params![
+                    claim_id, src_resolved, dst_resolved, rel_type, weight, ts,
+                    polarity, modality, valid_from, valid_to, extractor, extractor_version,
+                    confidence_band, source_memory_rid, span_start, span_end, namespace
+                ],
+            )?;
+
+            // Ensure entities exist
+            for (entity, etype) in [(&*src_resolved, src_type), (&*dst_resolved, dst_type)] {
+                conn.execute(
+                    "INSERT INTO entities (name, entity_type, first_seen, last_seen) \
+                     VALUES (?1, ?2, ?3, ?4) \
+                     ON CONFLICT(name) DO UPDATE SET last_seen = ?4, mention_count = mention_count + 1, \
+                     entity_type = CASE WHEN entities.entity_type = 'unknown' THEN ?2 ELSE entities.entity_type END",
+                    params![entity, etype, ts, ts],
+                )?;
+            }
+        } // conn dropped
+
+        // Phase 2: graph_index update
+        {
+            let mut gi = self.graph_index.write();
+            gi.add_entity(&src_resolved, src_type);
+            gi.add_entity(&dst_resolved, dst_type);
+            gi.add_edge(&src_resolved, &dst_resolved, weight as f32);
+        }
+
+        // Phase 3: backfill memory_entities for newly-created entities
+        self.backfill_memory_entities_for(&[&src_resolved, &dst_resolved])?;
+
+        // Log to oplog as "claim" operation
+        self.log_op(
+            "claim",
+            Some(&claim_id),
+            &serde_json::json!({
+                "claim_id": claim_id,
+                "src": src_resolved,
+                "dst": dst_resolved,
+                "rel_type": rel_type,
+                "weight": weight,
+                "polarity": polarity,
+                "modality": modality,
+                "valid_from": valid_from,
+                "valid_to": valid_to,
+                "extractor": extractor,
+                "confidence_band": confidence_band,
+                "source_memory_rid": source_memory_rid,
+                "namespace": namespace,
+                "created_at": ts,
+            }),
+            None,
+        )?;
+
+        Ok(claim_id)
+    }
+
+    /// Get claims (extended edges) for a specific entity, optionally filtered
+    /// by namespace and polarity.
+    pub fn get_claims(
+        &self,
+        entity: &str,
+        namespace: Option<&str>,
+    ) -> Result<Vec<serde_json::Value>> {
+        let conn = self.conn.lock();
+        let sql = if let Some(ns) = namespace {
+            format!(
+                "SELECT edge_id, src, dst, rel_type, weight, created_at, \
+                 polarity, modality, valid_from, valid_to, extractor, confidence_band, \
+                 source_memory_rid, namespace \
+                 FROM edges WHERE (src = ?1 OR dst = ?1) AND namespace = '{}' AND tombstoned = 0 \
+                 ORDER BY created_at DESC",
+                ns.replace('\'', "''")
+            )
+        } else {
+            "SELECT edge_id, src, dst, rel_type, weight, created_at, \
+             polarity, modality, valid_from, valid_to, extractor, confidence_band, \
+             source_memory_rid, namespace \
+             FROM edges WHERE (src = ?1 OR dst = ?1) AND tombstoned = 0 \
+             ORDER BY created_at DESC"
+                .to_string()
+        };
+
+        let mut stmt = conn.prepare(&sql)?;
+        let claims = stmt
+            .query_map(params![entity], |row| {
+                Ok(serde_json::json!({
+                    "claim_id": row.get::<_, String>(0)?,
+                    "src": row.get::<_, String>(1)?,
+                    "dst": row.get::<_, String>(2)?,
+                    "rel_type": row.get::<_, String>(3)?,
+                    "weight": row.get::<_, f64>(4)?,
+                    "created_at": row.get::<_, f64>(5)?,
+                    "polarity": row.get::<_, i32>(6)?,
+                    "modality": row.get::<_, String>(7)?,
+                    "valid_from": row.get::<_, Option<f64>>(8)?,
+                    "valid_to": row.get::<_, Option<f64>>(9)?,
+                    "extractor": row.get::<_, String>(10)?,
+                    "confidence_band": row.get::<_, String>(11)?,
+                    "source_memory_rid": row.get::<_, Option<String>>(12)?,
+                    "namespace": row.get::<_, String>(13)?,
+                }))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        Ok(claims)
+    }
 }

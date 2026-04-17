@@ -626,6 +626,114 @@ async fn relate(
     execute_cmd(engine, cmd, state.control.clone(), &state.inflight).await
 }
 
+async fn ingest_claim(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<Value>,
+) -> AppResult {
+    let _timer = crate::metrics::HandlerTimer::new("ingest_claim");
+    check_writable(&state)?;
+    let (_, engine) = resolve_engine(
+        &state,
+        headers.get("authorization").and_then(|v| v.to_str().ok()),
+    )?;
+    let cmd = Command::IngestClaim {
+        src: body["src"]
+            .as_str()
+            .ok_or_else(|| app_error(StatusCode::BAD_REQUEST, "missing 'src'"))?
+            .into(),
+        rel_type: body["rel_type"]
+            .as_str()
+            .ok_or_else(|| app_error(StatusCode::BAD_REQUEST, "missing 'rel_type'"))?
+            .into(),
+        dst: body["dst"]
+            .as_str()
+            .ok_or_else(|| app_error(StatusCode::BAD_REQUEST, "missing 'dst'"))?
+            .into(),
+        namespace: body
+            .get("namespace")
+            .and_then(|v| v.as_str())
+            .unwrap_or("default")
+            .into(),
+        polarity: body
+            .get("polarity")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(1) as i32,
+        modality: body
+            .get("modality")
+            .and_then(|v| v.as_str())
+            .unwrap_or("asserted")
+            .into(),
+        valid_from: body.get("valid_from").and_then(|v| v.as_f64()),
+        valid_to: body.get("valid_to").and_then(|v| v.as_f64()),
+        extractor: body
+            .get("extractor")
+            .and_then(|v| v.as_str())
+            .unwrap_or("manual")
+            .into(),
+        extractor_version: body
+            .get("extractor_version")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        confidence_band: body
+            .get("confidence_band")
+            .and_then(|v| v.as_str())
+            .unwrap_or("medium")
+            .into(),
+        source_memory_rid: body
+            .get("source_memory_rid")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        span_start: body
+            .get("span_start")
+            .and_then(|v| v.as_i64())
+            .map(|v| v as i32),
+        span_end: body
+            .get("span_end")
+            .and_then(|v| v.as_i64())
+            .map(|v| v as i32),
+        weight: body
+            .get("weight")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(1.0),
+    };
+    execute_cmd(engine, cmd, state.control.clone(), &state.inflight).await
+}
+
+async fn add_alias(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<Value>,
+) -> AppResult {
+    let _timer = crate::metrics::HandlerTimer::new("add_alias");
+    check_writable(&state)?;
+    let (_, engine) = resolve_engine(
+        &state,
+        headers.get("authorization").and_then(|v| v.to_str().ok()),
+    )?;
+    let cmd = Command::AddAlias {
+        alias: body["alias"]
+            .as_str()
+            .ok_or_else(|| app_error(StatusCode::BAD_REQUEST, "missing 'alias'"))?
+            .into(),
+        canonical_name: body["canonical_name"]
+            .as_str()
+            .ok_or_else(|| app_error(StatusCode::BAD_REQUEST, "missing 'canonical_name'"))?
+            .into(),
+        namespace: body
+            .get("namespace")
+            .and_then(|v| v.as_str())
+            .unwrap_or("default")
+            .into(),
+        source: body
+            .get("source")
+            .and_then(|v| v.as_str())
+            .unwrap_or("explicit")
+            .into(),
+    };
+    execute_cmd(engine, cmd, state.control.clone(), &state.inflight).await
+}
+
 async fn think(
     State(state): State<Arc<AppState>>,
     headers: axum::http::HeaderMap,
@@ -1225,6 +1333,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/recall", post(recall))
         .route("/v1/forget", post(forget))
         .route("/v1/relate", post(relate))
+        .route("/v1/claim", post(ingest_claim))
+        .route("/v1/alias", post(add_alias))
         .route("/v1/think", post(think))
         .route("/v1/conflicts", get(conflicts))
         .route("/v1/conflicts/{id}/resolve", post(resolve_conflict))

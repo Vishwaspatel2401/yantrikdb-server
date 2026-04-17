@@ -86,6 +86,31 @@ pub enum Command {
         resolution_note: Option<String>,
     },
 
+    // ── Claims (RFC 006 Phase 1) ────────────────────────
+    IngestClaim {
+        src: String,
+        rel_type: String,
+        dst: String,
+        namespace: String,
+        polarity: i32,
+        modality: String,
+        valid_from: Option<f64>,
+        valid_to: Option<f64>,
+        extractor: String,
+        extractor_version: Option<String>,
+        confidence_band: String,
+        source_memory_rid: Option<String>,
+        span_start: Option<i32>,
+        span_end: Option<i32>,
+        weight: f64,
+    },
+    AddAlias {
+        alias: String,
+        canonical_name: String,
+        namespace: String,
+        source: String,
+    },
+
     // ── Info ──────────────────────────────────────────────
     Personality,
     Stats,
