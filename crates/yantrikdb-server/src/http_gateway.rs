@@ -653,7 +653,7 @@ async fn think(
         run_personality: body
             .get("run_personality")
             .and_then(|v| v.as_bool())
-            .unwrap_or(false),
+            .unwrap_or(true),
         consolidation_limit: body
             .get("consolidation_limit")
             .and_then(|v| v.as_u64())
