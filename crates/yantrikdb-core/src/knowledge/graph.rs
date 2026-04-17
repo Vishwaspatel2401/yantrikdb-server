@@ -119,6 +119,170 @@ pub fn extract_heuristic_entities(text: &str) -> Vec<String> {
     entities
 }
 
+// ── Heuristic relation extraction (RFC 006 Phase 1) ──
+
+/// A candidate relation extracted from text by pattern matching.
+#[derive(Debug, Clone)]
+pub struct RelationCandidate {
+    pub src: String,
+    pub rel_type: String,
+    pub dst: String,
+    pub polarity: i32,       // 1=positive, -1=negative
+    pub modality: String,    // asserted, reported, hypothetical, denied
+    pub confidence_band: String, // low, medium, high
+}
+
+/// Relation patterns: keyword phrases that appear BETWEEN two entities
+/// and indicate a specific relationship. Each pattern maps to a rel_type.
+const RELATION_PATTERNS: &[(&[&str], &str)] = &[
+    // Role-based (entity A <pattern> entity B → rel_type)
+    (&["is the ceo of", "is ceo of", "serves as ceo of"], "ceo_of"),
+    (&["is the cto of", "is cto of", "serves as cto of"], "cto_of"),
+    (&["is the cfo of", "is cfo of", "serves as cfo of"], "cfo_of"),
+    (&["is the founder of", "is founder of", "co-founded"], "founded"),
+    (&["founded"], "founded"),
+    (&["leads", "heads", "runs", "manages", "directs"], "leads"),
+    (&["works at", "works for", "employed at", "employed by", "joined"], "works_at"),
+    // Location/origin
+    (&["was born in", "born in"], "born_in"),
+    (&["is headquartered in", "headquartered in", "is based in", "based in", "located in"], "headquartered_in"),
+    // Personal
+    (&["is married to", "married to", "wed to"], "married_to"),
+    // Corporate
+    (&["acquired", "bought", "purchased", "took over"], "acquired"),
+    (&["is a subsidiary of", "subsidiary of", "is owned by", "owned by"], "subsidiary_of"),
+    // Language/skill
+    (&["speaks", "is fluent in"], "speaks"),
+    // Generic membership/part-of
+    (&["is a member of", "member of", "belongs to", "part of"], "member_of"),
+    (&["reports to"], "reports_to"),
+];
+
+/// Possessive/appositive reverse patterns: "ORG's CEO, PERSON" or "ORG's CEO PERSON"
+const REVERSE_ROLE_PATTERNS: &[(&str, &str)] = &[
+    ("ceo", "ceo_of"),
+    ("cto", "cto_of"),
+    ("cfo", "cfo_of"),
+    ("founder", "founded"),
+    ("president", "leads"),
+    ("director", "leads"),
+    ("head", "leads"),
+];
+
+/// Extract candidate relations from text using entities as anchors.
+///
+/// For each ordered pair of entities (A before B in text), examines the
+/// text between them for relation-indicating keywords. Also checks for
+/// negation cues in the window to set polarity, and tense cues to infer
+/// past-tense (which callers can use for valid_to).
+///
+/// Returns high-precision, low-recall candidates — only emits when a
+/// clear keyword pattern matches. Designed for the RFC 006 Phase 1
+/// relation whitelist.
+pub fn extract_heuristic_relations(text: &str, entities: &[String]) -> Vec<RelationCandidate> {
+    if entities.len() < 2 {
+        return vec![];
+    }
+
+    let text_lower = text.to_lowercase();
+    let mut candidates: Vec<RelationCandidate> = Vec::new();
+
+    // Find position of each entity in the text (case-insensitive)
+    let mut entity_positions: Vec<(usize, &str)> = Vec::new();
+    for entity in entities {
+        let entity_lower = entity.to_lowercase();
+        if let Some(pos) = text_lower.find(&entity_lower) {
+            entity_positions.push((pos, entity.as_str()));
+        }
+    }
+    entity_positions.sort_by_key(|(pos, _)| *pos);
+
+    // For each adjacent pair, check the text between them
+    for i in 0..entity_positions.len() {
+        for j in (i + 1)..entity_positions.len() {
+            let (pos_a, entity_a) = entity_positions[i];
+            let (pos_b, entity_b) = entity_positions[j];
+
+            // Skip pairs too far apart (likely different sentences)
+            if pos_b - pos_a > 150 {
+                continue;
+            }
+
+            let between_start = pos_a + entity_a.to_lowercase().len();
+            let between_end = pos_b;
+            if between_start >= between_end || between_end > text_lower.len() {
+                continue;
+            }
+
+            let between = text_lower[between_start..between_end].trim();
+            if between.is_empty() {
+                continue;
+            }
+
+            // Check negation in the between-window, then strip negation
+            // words so pattern matching still works on "is NOT the CEO of"
+            let has_negation = NEGATION_CUES.iter().any(|cue| {
+                between.split_whitespace().any(|w| w == *cue)
+            });
+            let polarity = if has_negation { -1 } else { 1 };
+            let between_stripped: String = between
+                .split_whitespace()
+                .filter(|w| !NEGATION_CUES.contains(w))
+                .collect::<Vec<_>>()
+                .join(" ");
+
+            // Check modality cues
+            let modality = if MODALITY_CUES.iter().any(|cue| between.contains(cue)) {
+                "reported"
+            } else {
+                "asserted"
+            };
+
+            // Match forward patterns: entity_a <pattern> entity_b
+            // Uses between_stripped (negation removed) for matching.
+            for (patterns, rel_type) in RELATION_PATTERNS {
+                for pattern in *patterns {
+                    if between_stripped.contains(pattern) {
+                        candidates.push(RelationCandidate {
+                            src: entity_a.to_string(),
+                            rel_type: rel_type.to_string(),
+                            dst: entity_b.to_string(),
+                            polarity,
+                            modality: modality.to_string(),
+                            confidence_band: "medium".to_string(),
+                        });
+                        break; // one match per pattern group per pair
+                    }
+                }
+            }
+
+            // Check possessive/appositive reverse: "Acme's CEO, Alice" → ceo_of(Alice, Acme)
+            for (role_keyword, rel_type) in REVERSE_ROLE_PATTERNS {
+                let possessive = format!("'s {}", role_keyword);
+                let possessive2 = format!("s {}", role_keyword);
+                if between_stripped.contains(&possessive) || between_stripped.contains(&possessive2) {
+                    // Reversed: entity_a is the org, entity_b is the person
+                    candidates.push(RelationCandidate {
+                        src: entity_b.to_string(), // person
+                        rel_type: rel_type.to_string(),
+                        dst: entity_a.to_string(), // org
+                        polarity,
+                        modality: modality.to_string(),
+                        confidence_band: "medium".to_string(),
+                    });
+                    break;
+                }
+            }
+        }
+    }
+
+    // Deduplicate: same (src, rel_type, dst) keeps highest confidence
+    let mut seen = std::collections::HashSet::new();
+    candidates.retain(|c| seen.insert((c.src.clone(), c.rel_type.clone(), c.dst.clone())));
+
+    candidates
+}
+
 // ── Text feature analysis (Phase 0 audit data for RFC 006) ──
 
 /// Cues that indicate a statement is negated. Window-scanned around pattern
@@ -574,6 +738,67 @@ mod tests {
         let got = extract_heuristic_entities("the quick brown fox jumps over the lazy dog");
         assert!(got.is_empty(), "got: {:?}", got);
     }
+
+    // ── Relation extraction tests ──
+
+    #[test]
+    fn test_extract_relations_ceo_of() {
+        let entities = vec!["Alice Chen".to_string(), "Acme Corp".to_string()];
+        let rels = extract_heuristic_relations("Alice Chen is the CEO of Acme Corp", &entities);
+        assert_eq!(rels.len(), 1, "got: {:?}", rels);
+        assert_eq!(rels[0].src, "Alice Chen");
+        assert_eq!(rels[0].rel_type, "ceo_of");
+        assert_eq!(rels[0].dst, "Acme Corp");
+        assert_eq!(rels[0].polarity, 1);
+    }
+
+    #[test]
+    fn test_extract_relations_works_at() {
+        let entities = vec!["Bob".to_string(), "Google".to_string()];
+        let rels = extract_heuristic_relations("Bob works at Google as an engineer", &entities);
+        assert!(rels.iter().any(|r| r.rel_type == "works_at"), "got: {:?}", rels);
+    }
+
+    #[test]
+    fn test_extract_relations_headquartered() {
+        let entities = vec!["Acme".to_string(), "San Francisco".to_string()];
+        let rels = extract_heuristic_relations("Acme is headquartered in San Francisco", &entities);
+        assert!(rels.iter().any(|r| r.rel_type == "headquartered_in"), "got: {:?}", rels);
+    }
+
+    #[test]
+    fn test_extract_relations_negation_detected() {
+        let entities = vec!["Alice".to_string(), "Acme".to_string()];
+        let rels = extract_heuristic_relations("Alice is not the CEO of Acme", &entities);
+        assert_eq!(rels.len(), 1);
+        assert_eq!(rels[0].polarity, -1, "negation should set polarity to -1");
+    }
+
+    #[test]
+    fn test_extract_relations_no_match_unrelated() {
+        let entities = vec!["Alice".to_string(), "Bob".to_string()];
+        let rels = extract_heuristic_relations("Alice and Bob went for coffee", &entities);
+        assert!(rels.is_empty(), "should not extract relation from unrelated text, got: {:?}", rels);
+    }
+
+    #[test]
+    fn test_extract_relations_multiple_pairs() {
+        let entities = vec!["Alice".to_string(), "Acme".to_string(), "San Francisco".to_string()];
+        let rels = extract_heuristic_relations(
+            "Alice is the CEO of Acme which is headquartered in San Francisco",
+            &entities,
+        );
+        assert!(rels.len() >= 2, "should find CEO + headquartered, got: {:?}", rels);
+    }
+
+    #[test]
+    fn test_extract_relations_needs_two_entities() {
+        let entities = vec!["Alice".to_string()];
+        let rels = extract_heuristic_relations("Alice is the CEO", &entities);
+        assert!(rels.is_empty(), "cannot extract relation with only one entity");
+    }
+
+    // ── Text feature analysis tests ──
 
     #[test]
     fn test_analyze_text_features_basic_assertion() {

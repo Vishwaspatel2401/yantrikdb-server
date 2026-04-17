@@ -141,10 +141,33 @@ impl YantrikDB {
                 }
             }
 
-            // RFC 006 Phase 0: emit extraction audit telemetry. Log-only, no
-            // behavior change. Consumed by external observability to calibrate
-            // the v0.6.0 extraction whitelist against real agent-write data.
+            // RFC 006 Phase 1: extract relations and auto-create claims.
+            // Uses entity pairs as anchors + keyword patterns between them.
             let heuristic_vec: Vec<String> = heuristic_entities.iter().cloned().collect();
+            let relations = crate::graph::extract_heuristic_relations(text, &heuristic_vec);
+            for rel in &relations {
+                // Ingest each extracted relation as a claim (best-effort, don't
+                // fail the record() call if claim ingestion fails).
+                let _ = self.ingest_claim(
+                    &rel.src,
+                    &rel.rel_type,
+                    &rel.dst,
+                    namespace,
+                    rel.polarity,
+                    &rel.modality,
+                    None, // valid_from — heuristic doesn't extract dates yet
+                    None, // valid_to
+                    "heuristic_v1",
+                    Some("1.0"),
+                    &rel.confidence_band,
+                    Some(&rid),
+                    None, // span_start
+                    None, // span_end
+                    1.0,
+                );
+            }
+
+            // RFC 006 Phase 0: emit extraction audit telemetry.
             let features = crate::graph::analyze_text_features(text, &heuristic_vec);
             tracing::info!(
                 target: "yantrikdb::audit::extraction",
