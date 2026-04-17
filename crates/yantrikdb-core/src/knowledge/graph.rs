@@ -344,6 +344,28 @@ const CONCEPT_DST_RELS: &[&str] = &[
 
 /// Classify entity types using relationship semantics.
 /// Returns (src_type, dst_type) — either may be "unknown" if not inferable.
+/// Resolve an entity name to its canonical form using the `entity_aliases` table.
+///
+/// Looks up `alias` in the namespace-specific aliases first, then falls back to
+/// the `'default'` namespace. Returns the canonical name if found, otherwise
+/// returns the original `entity` string unchanged.
+///
+/// Used by `ingest_claim()` to normalize `src`/`dst` before storage, ensuring
+/// that "AWS" and "Amazon Web Services" are treated as the same entity in conflict
+/// detection and graph traversal.
+pub fn resolve_alias(entity: &str, namespace: &str, conn: &Connection) -> String {
+    // Query: prefer namespace-specific alias, fall back to 'default' namespace.
+    let result: rusqlite::Result<String> = conn.query_row(
+        "SELECT canonical_name FROM entity_aliases \
+         WHERE alias = ?1 AND namespace IN (?2, 'default') \
+         ORDER BY CASE WHEN namespace = ?2 THEN 0 ELSE 1 END \
+         LIMIT 1",
+        params![entity, namespace],
+        |row| row.get(0),
+    );
+    result.unwrap_or_else(|_| entity.to_string())
+}
+
 pub fn classify_with_relationship(
     src: &str,
     dst: &str,
@@ -707,7 +729,7 @@ mod tests {
         let db = setup_db();
         // Tombstone the Alice->Bob edge
         db.conn().execute(
-            "UPDATE edges SET tombstoned = 1 WHERE src = 'Alice' AND dst = 'Bob'",
+            "UPDATE claims SET tombstoned = 1 WHERE src = 'Alice' AND dst = 'Bob'",
             [],
         ).unwrap();
         let expanded = expand_entities_nhop(&*db.conn(), &["Alice"], 1, 30).unwrap();

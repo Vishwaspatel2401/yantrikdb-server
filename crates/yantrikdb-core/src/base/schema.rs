@@ -1,4 +1,4 @@
-pub const SCHEMA_VERSION: i32 = 14;
+pub const SCHEMA_VERSION: i32 = 15;
 
 pub const SCHEMA_SQL: &str = "
 -- Memory records: the source of truth
@@ -61,17 +61,49 @@ CREATE TABLE IF NOT EXISTS sessions (
     origin_actor TEXT
 );
 
--- Entity relationship graph
-CREATE TABLE IF NOT EXISTS edges (
-    edge_id TEXT PRIMARY KEY,            -- UUIDv7
-    src TEXT NOT NULL,                   -- entity name or memory rid
-    dst TEXT NOT NULL,                   -- entity name or memory rid
-    rel_type TEXT NOT NULL,              -- relationship type (e.g., \"is_about\", \"related_to\")
+-- Claims: first-class semantic relationship ledger (v0.7 / Phase 5 of RFC 006)
+-- Each claim records a structured (subject, relation, object) triple extracted from
+-- or written alongside a memory. The legacy `edges` name is preserved as a read-only
+-- VIEW for backward compatibility.
+CREATE TABLE IF NOT EXISTS claims (
+    claim_id TEXT PRIMARY KEY,           -- UUIDv7
+    src TEXT NOT NULL,                   -- source entity (subject)
+    dst TEXT NOT NULL,                   -- destination entity (object)
+    rel_type TEXT NOT NULL,              -- relationship type (e.g., \"ceo_of\", \"works_at\")
     weight REAL NOT NULL DEFAULT 1.0,    -- relationship strength [0, 1]
     created_at REAL NOT NULL,
     tombstoned INTEGER NOT NULL DEFAULT 0,
 
+    -- Claim qualifier columns (RFC 006 Layer A)
+    source_memory_rid TEXT,              -- provenance back to the memory text
+    polarity INTEGER NOT NULL DEFAULT 1, -- 1=positive, -1=negative, 0=unknown
+    modality TEXT NOT NULL DEFAULT 'asserted', -- asserted|reported|hypothetical|denied|quoted
+    valid_from REAL,                     -- world-validity start (unix timestamp, nullable)
+    valid_to REAL,                       -- world-validity end (null = present)
+    extractor TEXT NOT NULL DEFAULT 'manual', -- manual|structured_ingest|heuristic_v1|agent_llm
+    extractor_version TEXT,
+    confidence_band TEXT NOT NULL DEFAULT 'medium', -- low|medium|high
+    span_start INTEGER,                  -- byte offset in source memory (nullable)
+    span_end INTEGER,
+    namespace TEXT NOT NULL DEFAULT 'default',
+
     UNIQUE(src, dst, rel_type)
+);
+
+-- Backward-compat view: all code that reads FROM edges continues to work unchanged.
+-- This view is read-only; all writes now go through the claims table directly.
+CREATE VIEW IF NOT EXISTS edges AS
+    SELECT claim_id AS edge_id, src, dst, rel_type, weight, created_at, tombstoned
+    FROM claims;
+
+-- Entity alias table for canonical name resolution (RFC 006 Layer B)
+CREATE TABLE IF NOT EXISTS entity_aliases (
+    alias TEXT NOT NULL,
+    canonical_name TEXT NOT NULL,
+    namespace TEXT NOT NULL DEFAULT 'default',
+    source TEXT NOT NULL CHECK(source IN ('explicit', 'auto_suggested', 'approved')),
+    created_at REAL NOT NULL,
+    PRIMARY KEY (alias, namespace)
 );
 
 -- Entities extracted from memories
@@ -196,9 +228,13 @@ CREATE INDEX IF NOT EXISTS idx_memories_due_at ON memories(namespace, due_at) WH
 CREATE INDEX IF NOT EXISTS idx_memories_last_access ON memories(last_access);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_one_active ON sessions(namespace, client_id) WHERE status = 'active';
 CREATE INDEX IF NOT EXISTS idx_sessions_client_started ON sessions(namespace, client_id, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_edges_src ON edges(src);
-CREATE INDEX IF NOT EXISTS idx_edges_dst ON edges(dst);
-CREATE INDEX IF NOT EXISTS idx_edges_rel ON edges(rel_type);
+CREATE INDEX IF NOT EXISTS idx_claims_src ON claims(src);
+CREATE INDEX IF NOT EXISTS idx_claims_dst ON claims(dst);
+CREATE INDEX IF NOT EXISTS idx_claims_rel ON claims(rel_type);
+CREATE INDEX IF NOT EXISTS idx_claims_namespace ON claims(namespace);
+CREATE INDEX IF NOT EXISTS idx_claims_polarity ON claims(polarity);
+CREATE INDEX IF NOT EXISTS idx_claims_modality ON claims(modality);
+CREATE INDEX IF NOT EXISTS idx_alias_canonical ON entity_aliases(canonical_name, namespace);
 CREATE INDEX IF NOT EXISTS idx_oplog_timestamp ON oplog(timestamp);
 CREATE INDEX IF NOT EXISTS idx_oplog_target ON oplog(target_rid);
 CREATE INDEX IF NOT EXISTS idx_oplog_hlc ON oplog(hlc);
@@ -729,6 +765,72 @@ CREATE INDEX IF NOT EXISTS idx_memories_session ON memories(namespace, session_i
 CREATE INDEX IF NOT EXISTS idx_memories_due_at ON memories(namespace, due_at)
     WHERE due_at IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_memories_last_access ON memories(last_access);
+";
+
+/// SQL to migrate from schema V14 to V15.
+/// Phase 5 of RFC 006: rename `edges` → `claims`, expose `edges` as a read-only
+/// VIEW for backward compatibility, add claim qualifier columns, add entity_aliases.
+pub const MIGRATE_V14_TO_V15: &str = "
+-- 1. Create the claims table with all qualifier columns
+CREATE TABLE IF NOT EXISTS claims (
+    claim_id TEXT PRIMARY KEY,
+    src TEXT NOT NULL,
+    dst TEXT NOT NULL,
+    rel_type TEXT NOT NULL,
+    weight REAL NOT NULL DEFAULT 1.0,
+    created_at REAL NOT NULL,
+    tombstoned INTEGER NOT NULL DEFAULT 0,
+    source_memory_rid TEXT,
+    polarity INTEGER NOT NULL DEFAULT 1,
+    modality TEXT NOT NULL DEFAULT 'asserted',
+    valid_from REAL,
+    valid_to REAL,
+    extractor TEXT NOT NULL DEFAULT 'manual',
+    extractor_version TEXT,
+    confidence_band TEXT NOT NULL DEFAULT 'medium',
+    span_start INTEGER,
+    span_end INTEGER,
+    namespace TEXT NOT NULL DEFAULT 'default',
+    UNIQUE(src, dst, rel_type)
+);
+
+-- 2. Copy existing edges into claims (backfill claim columns with safe defaults)
+INSERT OR IGNORE INTO claims
+    (claim_id, src, dst, rel_type, weight, created_at, tombstoned,
+     source_memory_rid, polarity, modality, valid_from, valid_to,
+     extractor, extractor_version, confidence_band, span_start, span_end, namespace)
+SELECT
+    edge_id, src, dst, rel_type, weight, created_at, tombstoned,
+    NULL, 1, 'asserted', NULL, NULL,
+    'manual', NULL, 'medium', NULL, NULL, 'default'
+FROM edges;
+
+-- 3. Drop the old edges table (indexes on it are dropped automatically)
+DROP TABLE IF EXISTS edges;
+
+-- 4. Expose edges as a backward-compat read-only view
+CREATE VIEW IF NOT EXISTS edges AS
+    SELECT claim_id AS edge_id, src, dst, rel_type, weight, created_at, tombstoned
+    FROM claims;
+
+-- 5. Indexes on claims
+CREATE INDEX IF NOT EXISTS idx_claims_src ON claims(src);
+CREATE INDEX IF NOT EXISTS idx_claims_dst ON claims(dst);
+CREATE INDEX IF NOT EXISTS idx_claims_rel ON claims(rel_type);
+CREATE INDEX IF NOT EXISTS idx_claims_namespace ON claims(namespace);
+CREATE INDEX IF NOT EXISTS idx_claims_polarity ON claims(polarity);
+CREATE INDEX IF NOT EXISTS idx_claims_modality ON claims(modality);
+
+-- 6. Entity alias table for canonical name resolution
+CREATE TABLE IF NOT EXISTS entity_aliases (
+    alias TEXT NOT NULL,
+    canonical_name TEXT NOT NULL,
+    namespace TEXT NOT NULL DEFAULT 'default',
+    source TEXT NOT NULL CHECK(source IN ('explicit', 'auto_suggested', 'approved')),
+    created_at REAL NOT NULL,
+    PRIMARY KEY (alias, namespace)
+);
+CREATE INDEX IF NOT EXISTS idx_alias_canonical ON entity_aliases(canonical_name, namespace);
 ";
 
 /// SQL to migrate from schema V13 to V14.

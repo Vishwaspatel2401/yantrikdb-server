@@ -1,22 +1,48 @@
 use rusqlite::params;
 
 use crate::error::Result;
-use crate::types::{Edge, Entity};
+use crate::types::{Claim, Edge, Entity};
 
 use super::{now, YantrikDB};
 
 impl YantrikDB {
-    /// Create or update a relationship between entities.
+    /// Ingest a structured claim — the primary write path for the entity graph (v0.7).
+    ///
+    /// Writes to the `claims` table directly. All qualifier columns from RFC 006
+    /// are stored. The `edges` VIEW exposes the result for legacy readers.
+    ///
+    /// `src` and `dst` are resolved through `entity_aliases` before storage so
+    /// that "AWS" and "Amazon Web Services" map to the same canonical entity.
     #[tracing::instrument(skip(self))]
-    pub fn relate(
+    #[allow(clippy::too_many_arguments)]
+    pub fn ingest_claim(
         &self,
         src: &str,
         dst: &str,
         rel_type: &str,
         weight: f64,
+        source_memory_rid: Option<&str>,
+        polarity: i32,
+        modality: &str,
+        valid_from: Option<f64>,
+        valid_to: Option<f64>,
+        extractor: &str,
+        extractor_version: Option<&str>,
+        confidence_band: &str,
+        namespace: &str,
     ) -> Result<String> {
-        let edge_id = crate::id::new_id();
+        let claim_id = crate::id::new_id();
         let ts = now();
+
+        // Resolve aliases: normalise src/dst to canonical names before storing.
+        let (src_canonical, dst_canonical) = {
+            let conn = self.conn.lock();
+            let src_c = crate::graph::resolve_alias(src, namespace, &conn);
+            let dst_c = crate::graph::resolve_alias(dst, namespace, &conn);
+            (src_c, dst_c)
+        };
+        let src = src_canonical.as_str();
+        let dst = dst_canonical.as_str();
 
         // Classify entity types using relationship semantics
         let (src_type, dst_type) =
@@ -26,10 +52,18 @@ impl YantrikDB {
         {
             let conn = self.conn.lock();
             conn.execute(
-                "INSERT INTO edges (edge_id, src, dst, rel_type, weight, created_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
-                 ON CONFLICT(src, dst, rel_type) DO UPDATE SET weight = ?5, created_at = ?6",
-                params![edge_id, src, dst, rel_type, weight, ts],
+                "INSERT INTO claims \
+                 (claim_id, src, dst, rel_type, weight, created_at, \
+                  source_memory_rid, polarity, modality, valid_from, valid_to, \
+                  extractor, extractor_version, confidence_band, namespace) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15) \
+                 ON CONFLICT(src, dst, rel_type) DO UPDATE SET \
+                 weight = ?5, created_at = ?6",
+                params![
+                    claim_id, src, dst, rel_type, weight, ts,
+                    source_memory_rid, polarity, modality, valid_from, valid_to,
+                    extractor, extractor_version, confidence_band, namespace
+                ],
             )?;
 
             // Ensure entities exist with classified entity_type
@@ -53,29 +87,143 @@ impl YantrikDB {
         } // graph_index dropped
 
         // Backfill memory_entities for newly-created entities.
-        // When remember() runs BEFORE relate(), the memory doesn't get linked
-        // because the entity doesn't exist yet. Fix: scan active memories for
-        // mentions of the src/dst entities and create links retroactively.
         self.backfill_memory_entities_for(&[src, dst])?;
 
         self.log_op(
-            "relate",
-            Some(&edge_id),
+            "claim",
+            Some(&claim_id),
             &serde_json::json!({
-                "edge_id": edge_id,
+                "claim_id": claim_id,
                 "src": src,
                 "dst": dst,
                 "rel_type": rel_type,
                 "weight": weight,
                 "created_at": ts,
+                "source_memory_rid": source_memory_rid,
+                "polarity": polarity,
+                "modality": modality,
+                "valid_from": valid_from,
+                "valid_to": valid_to,
+                "extractor": extractor,
+                "extractor_version": extractor_version,
+                "confidence_band": confidence_band,
+                "namespace": namespace,
             }),
             None,
         )?;
 
-        Ok(edge_id)
+        Ok(claim_id)
+    }
+
+    /// Create or update a relationship between entities.
+    ///
+    /// **Deprecated since v0.7** — use `ingest_claim()` or `POST /v1/claim` instead.
+    /// This wrapper remains for backward compatibility with existing callers and
+    /// the CRDT replication path. All writes now go to the `claims` table.
+    #[tracing::instrument(skip(self))]
+    pub fn relate(
+        &self,
+        src: &str,
+        dst: &str,
+        rel_type: &str,
+        weight: f64,
+    ) -> Result<String> {
+        self.ingest_claim(
+            src, dst, rel_type, weight,
+            None,       // source_memory_rid
+            1,          // polarity = positive
+            "asserted", // modality
+            None,       // valid_from
+            None,       // valid_to
+            "manual",   // extractor
+            None,       // extractor_version
+            "medium",   // confidence_band
+            "default",  // namespace
+        )
+    }
+
+    /// Get all claims connected to an entity, with full claim metadata.
+    pub fn get_claims(&self, entity: &str, namespace: Option<&str>) -> Result<Vec<Claim>> {
+        let conn = self.conn.lock();
+        let (sql, params_box): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = match namespace {
+            Some(ns) => (
+                "SELECT claim_id, src, dst, rel_type, weight, created_at, \
+                  source_memory_rid, polarity, modality, valid_from, valid_to, \
+                  extractor, extractor_version, confidence_band, span_start, span_end, namespace \
+                 FROM claims \
+                 WHERE (src = ?1 OR dst = ?1) AND tombstoned = 0 AND namespace = ?2"
+                    .to_string(),
+                vec![
+                    Box::new(entity.to_string()) as Box<dyn rusqlite::types::ToSql>,
+                    Box::new(ns.to_string()),
+                ],
+            ),
+            None => (
+                "SELECT claim_id, src, dst, rel_type, weight, created_at, \
+                  source_memory_rid, polarity, modality, valid_from, valid_to, \
+                  extractor, extractor_version, confidence_band, span_start, span_end, namespace \
+                 FROM claims \
+                 WHERE (src = ?1 OR dst = ?1) AND tombstoned = 0"
+                    .to_string(),
+                vec![Box::new(entity.to_string()) as Box<dyn rusqlite::types::ToSql>],
+            ),
+        };
+
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params_box.iter().map(|p| p.as_ref()).collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let claims = stmt
+            .query_map(param_refs.as_slice(), |row| {
+                Ok(Claim {
+                    claim_id: row.get(0)?,
+                    src: row.get(1)?,
+                    dst: row.get(2)?,
+                    rel_type: row.get(3)?,
+                    weight: row.get(4)?,
+                    created_at: row.get(5)?,
+                    source_memory_rid: row.get(6)?,
+                    polarity: row.get(7)?,
+                    modality: row.get(8)?,
+                    valid_from: row.get(9)?,
+                    valid_to: row.get(10)?,
+                    extractor: row.get(11)?,
+                    extractor_version: row.get(12)?,
+                    confidence_band: row.get(13)?,
+                    span_start: row.get(14)?,
+                    span_end: row.get(15)?,
+                    namespace: row.get(16)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        Ok(claims)
+    }
+
+    /// Register an explicit entity alias for canonical name resolution.
+    ///
+    /// After adding `alias → canonical_name`, any `ingest_claim()` call that
+    /// uses `alias` as `src` or `dst` will automatically resolve to `canonical_name`.
+    pub fn add_entity_alias(
+        &self,
+        alias: &str,
+        canonical_name: &str,
+        namespace: &str,
+    ) -> Result<()> {
+        let ts = now();
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT INTO entity_aliases (alias, canonical_name, namespace, source, created_at) \
+             VALUES (?1, ?2, ?3, 'explicit', ?4) \
+             ON CONFLICT(alias, namespace) DO UPDATE SET canonical_name = ?2",
+            params![alias, canonical_name, namespace, ts],
+        )?;
+        Ok(())
     }
 
     /// Get all edges connected to an entity.
+    ///
+    /// Reads through the `edges` backward-compat VIEW. For full claim metadata
+    /// use `get_claims()` instead.
     pub fn get_edges(&self, entity: &str) -> Result<Vec<Edge>> {
         let conn = self.conn.lock();
         let mut stmt = conn.prepare(

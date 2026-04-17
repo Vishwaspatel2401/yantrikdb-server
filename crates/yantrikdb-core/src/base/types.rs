@@ -120,6 +120,9 @@ pub struct RefinementHint {
 }
 
 /// An edge in the entity graph.
+///
+/// Returned by `get_edges()` which reads through the `edges` backward-compat VIEW.
+/// For full claim metadata use `get_claims()` / the `Claim` struct.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Edge {
     pub edge_id: String,
@@ -127,6 +130,48 @@ pub struct Edge {
     pub dst: String,
     pub rel_type: String,
     pub weight: f64,
+}
+
+/// A first-class claim record (v0.7, RFC 006 Phase 5).
+///
+/// Claims are the physical storage primitive. The `edges` table is now a
+/// read-only VIEW over `claims` for backward compatibility.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Claim {
+    /// Stable primary key (UUIDv7). Equivalent to `edge_id` in the compat VIEW.
+    pub claim_id: String,
+    /// Source entity (subject of the triple).
+    pub src: String,
+    /// Destination entity (object of the triple).
+    pub dst: String,
+    /// Relationship type, e.g. `"ceo_of"`, `"works_at"`.
+    pub rel_type: String,
+    /// Relationship strength [0, 1].
+    pub weight: f64,
+    /// Unix timestamp when the claim was first recorded.
+    pub created_at: f64,
+    /// Provenance: rid of the memory this claim was extracted from.
+    pub source_memory_rid: Option<String>,
+    /// Polarity: `1` = positive, `-1` = negative, `0` = unknown.
+    pub polarity: i32,
+    /// Epistemic modality: `asserted | reported | hypothetical | denied | quoted`.
+    pub modality: String,
+    /// World-validity start (unix timestamp). `None` = no temporal qualifier.
+    pub valid_from: Option<f64>,
+    /// World-validity end. `None` = currently valid / open-ended.
+    pub valid_to: Option<f64>,
+    /// How the claim was produced: `manual | structured_ingest | heuristic_v1 | agent_llm`.
+    pub extractor: String,
+    /// Extractor version string (e.g. `"heuristic_v1.0"`).
+    pub extractor_version: Option<String>,
+    /// Confidence band: `low | medium | high`.
+    pub confidence_band: String,
+    /// Byte offset into `source_memory_rid` where the evidence span starts.
+    pub span_start: Option<i64>,
+    /// Byte offset where the evidence span ends.
+    pub span_end: Option<i64>,
+    /// Namespace this claim belongs to.
+    pub namespace: String,
 }
 
 /// An entity in the knowledge graph.

@@ -141,7 +141,7 @@ pub fn apply_ops(db: &YantrikDB, ops: &[OplogEntry]) -> Result<SyncStats> {
         }
 
         // Track if we need to backfill memory_entities after
-        if op.op_type == "relate" || op.op_type == "record" {
+        if op.op_type == "relate" || op.op_type == "claim" || op.op_type == "record" {
             has_relate_or_record = true;
         }
 
@@ -208,7 +208,7 @@ fn materialize_op(db: &YantrikDB, op: &OplogEntry) -> Result<()> {
                 });
             }
         }
-        "relate" => {
+        "relate" | "claim" => {
             materialize_relate(&*db.conn(), &op.payload)?;
             // Update graph index
             let src = op.payload["src"].as_str().unwrap_or_default();
@@ -364,9 +364,16 @@ fn materialize_record(conn: &Connection, payload: &serde_json::Value, _embedding
     Ok(())
 }
 
-/// Materialize a "relate" op: LWW on (src, dst, rel_type), higher HLC wins.
+/// Materialize a "relate" or "claim" op: LWW on (src, dst, rel_type), higher HLC wins.
+///
+/// Supports both legacy "relate" payload format (key `edge_id`) and new "claim"
+/// payload format (key `claim_id`). Both write to the `claims` table.
 fn materialize_relate(conn: &Connection, payload: &serde_json::Value) -> Result<()> {
-    let edge_id = payload["edge_id"].as_str().unwrap_or_default();
+    // Accept both legacy `edge_id` (op_type="relate") and new `claim_id` (op_type="claim")
+    let edge_id = payload["claim_id"]
+        .as_str()
+        .or_else(|| payload["edge_id"].as_str())
+        .unwrap_or_default();
     let src = payload["src"].as_str().unwrap_or_default();
     let dst = payload["dst"].as_str().unwrap_or_default();
     let rel_type = payload["rel_type"].as_str().unwrap_or_default();
@@ -377,14 +384,15 @@ fn materialize_relate(conn: &Connection, payload: &serde_json::Value) -> Result<
         return Ok(());
     }
 
-    // LWW: ON CONFLICT update if the incoming created_at is newer
+    // LWW: ON CONFLICT update if the incoming created_at is newer.
+    // Writes to `claims` (the physical table). `edges` is now a read-only VIEW.
     conn.execute(
-        "INSERT INTO edges (edge_id, src, dst, rel_type, weight, created_at) \
+        "INSERT INTO claims (claim_id, src, dst, rel_type, weight, created_at) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
          ON CONFLICT(src, dst, rel_type) DO UPDATE SET \
          weight = CASE WHEN ?6 > created_at THEN ?5 ELSE weight END, \
          created_at = CASE WHEN ?6 > created_at THEN ?6 ELSE created_at END, \
-         edge_id = CASE WHEN ?6 > created_at THEN ?1 ELSE edge_id END",
+         claim_id = CASE WHEN ?6 > created_at THEN ?1 ELSE claim_id END",
         params![edge_id, src, dst, rel_type, weight, created_at],
     )?;
 
@@ -922,7 +930,8 @@ mod tests {
         a.relate("Alice", "Bob", "knows", 0.9).unwrap();
 
         let ops = extract_ops_since(&*a.conn(), None, None, None, 100).unwrap();
-        let relate_op = ops.iter().find(|o| o.op_type == "relate").unwrap();
+        // Since v0.7, relate() is a wrapper around ingest_claim() which logs op_type="claim"
+        let relate_op = ops.iter().find(|o| o.op_type == "claim" || o.op_type == "relate").unwrap();
 
         let b = YantrikDB::new_with_actor(":memory:", 8, "B").unwrap();
         apply_ops(&b, &[relate_op.clone()]).unwrap();

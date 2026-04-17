@@ -30,11 +30,20 @@ pub enum OpCode {
     RecallResult = 0x31,
     RecallEnd = 0x32,
 
-    // --- Graph (0x40–0x43) ---
+    // --- Graph (0x40–0x49) ---
     Relate = 0x40,
     RelateOk = 0x41,
     Edges = 0x42,
     EdgesResult = 0x43,
+    /// Ingest a structured claim (v0.7 primary write path; supersedes Relate).
+    Claim = 0x44,
+    ClaimOk = 0x45,
+    /// Query claims for an entity.
+    Claims = 0x46,
+    ClaimsResult = 0x47,
+    /// Register an explicit entity alias for canonical name resolution.
+    Alias = 0x48,
+    AliasOk = 0x49,
 
     // --- Forget (0x50–0x51) ---
     Forget = 0x50,
@@ -113,6 +122,12 @@ impl OpCode {
             0x41 => Some(Self::RelateOk),
             0x42 => Some(Self::Edges),
             0x43 => Some(Self::EdgesResult),
+            0x44 => Some(Self::Claim),
+            0x45 => Some(Self::ClaimOk),
+            0x46 => Some(Self::Claims),
+            0x47 => Some(Self::ClaimsResult),
+            0x48 => Some(Self::Alias),
+            0x49 => Some(Self::AliasOk),
 
             0x50 => Some(Self::Forget),
             0x51 => Some(Self::ForgetOk),
@@ -187,6 +202,12 @@ mod tests {
             OpCode::RelateOk,
             OpCode::Edges,
             OpCode::EdgesResult,
+            OpCode::Claim,
+            OpCode::ClaimOk,
+            OpCode::Claims,
+            OpCode::ClaimsResult,
+            OpCode::Alias,
+            OpCode::AliasOk,
             OpCode::Forget,
             OpCode::ForgetOk,
             OpCode::SessionStart,

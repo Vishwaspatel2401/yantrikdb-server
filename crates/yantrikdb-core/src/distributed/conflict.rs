@@ -314,9 +314,10 @@ fn find_memory_for_edge(
     dst: &str,
     rel_type: &str,
 ) -> Result<Option<String>> {
+    // Accept both legacy op_type="relate" and new op_type="claim" (v0.7+).
     let result = conn.query_row(
         "SELECT target_rid FROM oplog
-         WHERE op_type = 'relate'
+         WHERE op_type IN ('relate', 'claim')
            AND json_extract(payload, '$.src') = ?1
            AND json_extract(payload, '$.dst') = ?2
            AND json_extract(payload, '$.rel_type') = ?3

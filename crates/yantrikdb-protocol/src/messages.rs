@@ -214,6 +214,105 @@ pub struct EdgeMsg {
     pub weight: f64,
 }
 
+// ── Claims (v0.7) ─────────────────────────────────────────────────
+
+/// Structured claim ingest request. All writes should use this instead of
+/// `RelateRequest` starting from v0.7.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ClaimRequest {
+    pub src: String,
+    pub dst: String,
+    pub rel_type: String,
+    #[serde(default = "default_weight")]
+    pub weight: f64,
+    #[serde(default)]
+    pub source_memory_rid: Option<String>,
+    /// Polarity: `"positive"` (default), `"negative"`, or `"unknown"`.
+    #[serde(default = "default_polarity")]
+    pub polarity: String,
+    /// Modality: `"asserted"` (default), `"reported"`, `"hypothetical"`, `"denied"`, `"quoted"`.
+    #[serde(default = "default_modality")]
+    pub modality: String,
+    #[serde(default)]
+    pub valid_from: Option<f64>,
+    #[serde(default)]
+    pub valid_to: Option<f64>,
+    /// Extractor: `"manual"` (default), `"structured_ingest"`, `"heuristic_v1"`, `"agent_llm"`.
+    #[serde(default = "default_extractor")]
+    pub extractor: String,
+    #[serde(default)]
+    pub extractor_version: Option<String>,
+    /// Confidence band: `"low"`, `"medium"` (default), `"high"`.
+    #[serde(default = "default_confidence_band")]
+    pub confidence_band: String,
+    #[serde(default = "default_namespace_str")]
+    pub namespace: String,
+}
+
+fn default_polarity() -> String { "positive".into() }
+fn default_modality() -> String { "asserted".into() }
+fn default_extractor() -> String { "manual".into() }
+fn default_confidence_band() -> String { "medium".into() }
+fn default_namespace_str() -> String { "default".into() }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ClaimOkResponse {
+    pub claim_id: String,
+    pub created_at: f64,
+    pub namespace: String,
+}
+
+/// Query claims for an entity.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ClaimsRequest {
+    pub entity: String,
+    #[serde(default)]
+    pub namespace: Option<String>,
+}
+
+/// Wire representation of a single claim.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ClaimMsg {
+    pub claim_id: String,
+    pub src: String,
+    pub dst: String,
+    pub rel_type: String,
+    pub weight: f64,
+    pub created_at: f64,
+    pub source_memory_rid: Option<String>,
+    pub polarity: i32,
+    pub modality: String,
+    pub valid_from: Option<f64>,
+    pub valid_to: Option<f64>,
+    pub extractor: String,
+    pub extractor_version: Option<String>,
+    pub confidence_band: String,
+    pub span_start: Option<i64>,
+    pub span_end: Option<i64>,
+    pub namespace: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ClaimsResultMsg {
+    pub claims: Vec<ClaimMsg>,
+}
+
+/// Register an explicit entity alias for canonical name resolution.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AliasRequest {
+    pub alias: String,
+    pub canonical_name: String,
+    #[serde(default = "default_namespace_str")]
+    pub namespace: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AliasOkResponse {
+    pub alias: String,
+    pub canonical_name: String,
+    pub namespace: String,
+}
+
 // ── Forget ────────────────────────────────────────────────────────
 
 #[derive(Debug, Serialize, Deserialize)]

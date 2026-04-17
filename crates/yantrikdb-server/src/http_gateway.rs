@@ -5,8 +5,9 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path as AxumPath, State},
+    extract::{Path as AxumPath, Query, State},
     http::StatusCode,
+    response::IntoResponse,
     routing::{delete, get, post},
     Json, Router,
 };
@@ -597,31 +598,151 @@ async fn forget(
     .await
 }
 
+/// **Deprecated since v0.7.** Use `POST /v1/claim` instead.
+///
+/// This endpoint remains for backward compatibility. A `Deprecation: true` and
+/// `Link: </v1/claim>; rel="successor-version"` header are added to responses
+/// to guide callers to migrate.
 async fn relate(
     State(state): State<Arc<AppState>>,
     headers: axum::http::HeaderMap,
     Json(body): Json<Value>,
-) -> AppResult {
+) -> impl IntoResponse {
     let _timer = crate::metrics::HandlerTimer::new("relate");
+    if let Err(e) = check_writable(&state) {
+        return e.into_response();
+    }
+    let (_, engine) = match resolve_engine(
+        &state,
+        headers.get("authorization").and_then(|v| v.to_str().ok()),
+    ) {
+        Ok(v) => v,
+        Err(e) => return e.into_response(),
+    };
+    let cmd = match (|| -> Result<Command, AppError> {
+        Ok(Command::Relate {
+            entity: body["entity"]
+                .as_str()
+                .ok_or_else(|| app_error(StatusCode::BAD_REQUEST, "missing 'entity'"))?
+                .into(),
+            target: body["target"]
+                .as_str()
+                .ok_or_else(|| app_error(StatusCode::BAD_REQUEST, "missing 'target'"))?
+                .into(),
+            relationship: body["relationship"]
+                .as_str()
+                .ok_or_else(|| app_error(StatusCode::BAD_REQUEST, "missing 'relationship'"))?
+                .into(),
+            weight: body.get("weight").and_then(|v| v.as_f64()).unwrap_or(1.0),
+        })
+    })() {
+        Ok(c) => c,
+        Err(e) => return e.into_response(),
+    };
+    match execute_cmd(engine, cmd, state.control.clone(), &state.inflight).await {
+        Ok(Json(body)) => {
+            let mut resp_headers = axum::http::HeaderMap::new();
+            resp_headers.insert("Deprecation", axum::http::HeaderValue::from_static("true"));
+            resp_headers.insert(
+                "Link",
+                axum::http::HeaderValue::from_static("</v1/claim>; rel=\"successor-version\""),
+            );
+            (StatusCode::OK, resp_headers, Json(body)).into_response()
+        }
+        Err(e) => e.into_response(),
+    }
+}
+
+/// Ingest a structured claim — v0.7 primary write path.
+async fn claim(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<Value>,
+) -> AppResult {
+    let _timer = crate::metrics::HandlerTimer::new("claim");
     check_writable(&state)?;
     let (_, engine) = resolve_engine(
         &state,
         headers.get("authorization").and_then(|v| v.to_str().ok()),
     )?;
-    let cmd = Command::Relate {
-        entity: body["entity"]
+
+    let polarity_str = body.get("polarity").and_then(|v| v.as_str()).unwrap_or("positive");
+    let polarity: i32 = match polarity_str {
+        "positive" => 1,
+        "negative" => -1,
+        "unknown" => 0,
+        _ => return Err(app_error(StatusCode::BAD_REQUEST, "polarity must be 'positive', 'negative', or 'unknown'")),
+    };
+
+    let cmd = Command::Claim {
+        src: body["src"]
             .as_str()
-            .ok_or_else(|| app_error(StatusCode::BAD_REQUEST, "missing 'entity'"))?
+            .ok_or_else(|| app_error(StatusCode::BAD_REQUEST, "missing 'src'"))?
             .into(),
-        target: body["target"]
+        dst: body["dst"]
             .as_str()
-            .ok_or_else(|| app_error(StatusCode::BAD_REQUEST, "missing 'target'"))?
+            .ok_or_else(|| app_error(StatusCode::BAD_REQUEST, "missing 'dst'"))?
             .into(),
-        relationship: body["relationship"]
+        rel_type: body["rel_type"]
             .as_str()
-            .ok_or_else(|| app_error(StatusCode::BAD_REQUEST, "missing 'relationship'"))?
+            .ok_or_else(|| app_error(StatusCode::BAD_REQUEST, "missing 'rel_type'"))?
             .into(),
         weight: body.get("weight").and_then(|v| v.as_f64()).unwrap_or(1.0),
+        source_memory_rid: body.get("source_memory_rid").and_then(|v| v.as_str()).map(str::to_owned),
+        polarity,
+        modality: body.get("modality").and_then(|v| v.as_str()).unwrap_or("asserted").into(),
+        valid_from: body.get("valid_from").and_then(|v| v.as_f64()),
+        valid_to: body.get("valid_to").and_then(|v| v.as_f64()),
+        extractor: body.get("extractor").and_then(|v| v.as_str()).unwrap_or("manual").into(),
+        extractor_version: body.get("extractor_version").and_then(|v| v.as_str()).map(str::to_owned),
+        confidence_band: body.get("confidence_band").and_then(|v| v.as_str()).unwrap_or("medium").into(),
+        namespace: body.get("namespace").and_then(|v| v.as_str()).unwrap_or("default").into(),
+    };
+    execute_cmd(engine, cmd, state.control.clone(), &state.inflight).await
+}
+
+/// Query claims connected to an entity. Optional `namespace` query param.
+async fn get_claims(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> AppResult {
+    let _timer = crate::metrics::HandlerTimer::new("claims");
+    let (_, engine) = resolve_engine(
+        &state,
+        headers.get("authorization").and_then(|v| v.to_str().ok()),
+    )?;
+    let entity = params
+        .get("entity")
+        .ok_or_else(|| app_error(StatusCode::BAD_REQUEST, "missing 'entity' query param"))?
+        .clone();
+    let namespace = params.get("namespace").cloned();
+    let cmd = Command::Claims { entity, namespace };
+    execute_cmd(engine, cmd, state.control.clone(), &state.inflight).await
+}
+
+/// Register an explicit entity alias: `alias → canonical_name`.
+async fn add_alias(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<Value>,
+) -> AppResult {
+    let _timer = crate::metrics::HandlerTimer::new("alias");
+    check_writable(&state)?;
+    let (_, engine) = resolve_engine(
+        &state,
+        headers.get("authorization").and_then(|v| v.to_str().ok()),
+    )?;
+    let cmd = Command::Alias {
+        alias: body["alias"]
+            .as_str()
+            .ok_or_else(|| app_error(StatusCode::BAD_REQUEST, "missing 'alias'"))?
+            .into(),
+        canonical_name: body["canonical_name"]
+            .as_str()
+            .ok_or_else(|| app_error(StatusCode::BAD_REQUEST, "missing 'canonical_name'"))?
+            .into(),
+        namespace: body.get("namespace").and_then(|v| v.as_str()).unwrap_or("default").into(),
     };
     execute_cmd(engine, cmd, state.control.clone(), &state.inflight).await
 }
@@ -1225,6 +1346,9 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/recall", post(recall))
         .route("/v1/forget", post(forget))
         .route("/v1/relate", post(relate))
+        .route("/v1/claim", post(claim))
+        .route("/v1/claims", get(get_claims))
+        .route("/v1/alias", post(add_alias))
         .route("/v1/think", post(think))
         .route("/v1/conflicts", get(conflicts))
         .route("/v1/conflicts/{id}/resolve", post(resolve_conflict))

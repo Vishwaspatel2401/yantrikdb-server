@@ -219,6 +219,89 @@ pub fn execute_with_guard(
             Ok(CommandResult::Json(json!({ "edges": edge_list })))
         }
 
+        Command::Claim {
+            src,
+            dst,
+            rel_type,
+            weight,
+            source_memory_rid,
+            polarity,
+            modality,
+            valid_from,
+            valid_to,
+            extractor,
+            extractor_version,
+            confidence_band,
+            namespace,
+        } => {
+            let claim_id = db.ingest_claim(
+                &src,
+                &dst,
+                &rel_type,
+                weight,
+                source_memory_rid.as_deref(),
+                polarity,
+                &modality,
+                valid_from,
+                valid_to,
+                &extractor,
+                extractor_version.as_deref(),
+                &confidence_band,
+                &namespace,
+            )?;
+            let created_at = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs_f64())
+                .unwrap_or(0.0);
+            Ok(CommandResult::Json(json!({
+                "claim_id": claim_id,
+                "created_at": created_at,
+                "namespace": namespace,
+            })))
+        }
+
+        Command::Claims { entity, namespace } => {
+            let claims = db.get_claims(&entity, namespace.as_deref())?;
+            let claim_list: Vec<Value> = claims
+                .iter()
+                .map(|c| {
+                    json!({
+                        "claim_id": c.claim_id,
+                        "src": c.src,
+                        "dst": c.dst,
+                        "rel_type": c.rel_type,
+                        "weight": c.weight,
+                        "created_at": c.created_at,
+                        "source_memory_rid": c.source_memory_rid,
+                        "polarity": c.polarity,
+                        "modality": c.modality,
+                        "valid_from": c.valid_from,
+                        "valid_to": c.valid_to,
+                        "extractor": c.extractor,
+                        "extractor_version": c.extractor_version,
+                        "confidence_band": c.confidence_band,
+                        "span_start": c.span_start,
+                        "span_end": c.span_end,
+                        "namespace": c.namespace,
+                    })
+                })
+                .collect();
+            Ok(CommandResult::Json(json!({ "claims": claim_list })))
+        }
+
+        Command::Alias {
+            alias,
+            canonical_name,
+            namespace,
+        } => {
+            db.add_entity_alias(&alias, &canonical_name, &namespace)?;
+            Ok(CommandResult::Json(json!({
+                "alias": alias,
+                "canonical_name": canonical_name,
+                "namespace": namespace,
+            })))
+        }
+
         Command::SessionStart {
             namespace,
             client_id,

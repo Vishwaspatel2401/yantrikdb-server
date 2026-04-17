@@ -50,6 +50,33 @@ pub enum Command {
     Edges {
         entity: String,
     },
+    /// Structured claim ingest — v0.7 primary write path (supersedes Relate).
+    Claim {
+        src: String,
+        dst: String,
+        rel_type: String,
+        weight: f64,
+        source_memory_rid: Option<String>,
+        polarity: i32,
+        modality: String,
+        valid_from: Option<f64>,
+        valid_to: Option<f64>,
+        extractor: String,
+        extractor_version: Option<String>,
+        confidence_band: String,
+        namespace: String,
+    },
+    /// Query claims for an entity.
+    Claims {
+        entity: String,
+        namespace: Option<String>,
+    },
+    /// Register an explicit entity alias for canonical name resolution.
+    Alias {
+        alias: String,
+        canonical_name: String,
+        namespace: String,
+    },
 
     // ── Session ───────────────────────────────────────────
     SessionStart {

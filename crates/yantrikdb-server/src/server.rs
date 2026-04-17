@@ -427,6 +427,45 @@ fn frame_to_command(frame: &Frame) -> anyhow::Result<Command> {
         }
         OpCode::ListDb => Ok(Command::ListDb),
         OpCode::Ping => Ok(Command::Ping),
+        OpCode::Claim => {
+            let req: ClaimRequest = unpack(&frame.payload)?;
+            let polarity: i32 = match req.polarity.as_str() {
+                "positive" => 1,
+                "negative" => -1,
+                "unknown" => 0,
+                _ => 1,
+            };
+            Ok(Command::Claim {
+                src: req.src,
+                dst: req.dst,
+                rel_type: req.rel_type,
+                weight: req.weight,
+                source_memory_rid: req.source_memory_rid,
+                polarity,
+                modality: req.modality,
+                valid_from: req.valid_from,
+                valid_to: req.valid_to,
+                extractor: req.extractor,
+                extractor_version: req.extractor_version,
+                confidence_band: req.confidence_band,
+                namespace: req.namespace,
+            })
+        }
+        OpCode::Claims => {
+            let req: ClaimsRequest = unpack(&frame.payload)?;
+            Ok(Command::Claims {
+                entity: req.entity,
+                namespace: req.namespace,
+            })
+        }
+        OpCode::Alias => {
+            let req: AliasRequest = unpack(&frame.payload)?;
+            Ok(Command::Alias {
+                alias: req.alias,
+                canonical_name: req.canonical_name,
+                namespace: req.namespace,
+            })
+        }
         other => anyhow::bail!("unsupported opcode: {:?}", other),
     }
 }
@@ -486,6 +525,12 @@ fn response_opcode_for_json(value: &serde_json::Value) -> OpCode {
         OpCode::RelateOk
     } else if value.get("edges").is_some() {
         OpCode::EdgesResult
+    } else if value.get("claim_id").is_some() {
+        OpCode::ClaimOk
+    } else if value.get("claims").is_some() {
+        OpCode::ClaimsResult
+    } else if value.get("alias").is_some() && value.get("canonical_name").is_some() {
+        OpCode::AliasOk
     } else if value.get("session_id").is_some() {
         OpCode::SessionOk
     } else if value.get("consolidation_count").is_some() {
